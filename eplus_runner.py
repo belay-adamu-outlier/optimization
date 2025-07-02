@@ -62,11 +62,6 @@ class EnergyPlusRunner:
         
         try:
             # Run the simulation
-            print(f"Running EnergyPlus simulation...")
-            print(f"IDF: {idf_file_path}")
-            print(f"Weather: {weather_file_path}")
-            print(f"Output directory: {output_directory}")
-            
             idf.run(**default_options)
             
             # Load and store CSV data
@@ -84,7 +79,6 @@ class EnergyPlusRunner:
                 }
             }
             
-            print(f"Simulation completed! Results stored for querying.")
             return self.simulation_results
             
         except Exception as e:
@@ -97,12 +91,10 @@ class EnergyPlusRunner:
         if csv_file and os.path.exists(csv_file):
             try:
                 self.csv_data = pd.read_csv(csv_file)
-                print(f"Loaded CSV data with {len(self.csv_data)} records and {len(self.csv_data.columns)} columns")
             except Exception as e:
                 print(f"Error loading CSV data: {e}")
                 self.csv_data = None
         else:
-            print("Warning: No CSV output file found")
             self.csv_data = None
     
     def _get_csv_file_path(self):
@@ -192,7 +184,6 @@ class EnergyPlusRunner:
         if self.output_directory and self.output_directory.startswith(tempfile.gettempdir()):
             try:
                 shutil.rmtree(self.output_directory)
-                print(f"Cleaned up temporary directory: {self.output_directory}")
             except Exception as e:
                 print(f"Error cleaning up temporary directory: {e}")
 
@@ -230,31 +221,14 @@ if __name__ == "__main__":
     runner = EnergyPlusRunner(idd_file)
     
     # Run simulation once
-    print("Running simulation...")
     runner.run_simulation(idf_file, weather_file)
     
-    # Now query different results without re-running simulation
-    print("\nQuerying results from stored simulation data:")
-    
-    # Get available variables
+    # Query different results without re-running simulation
     available_vars = runner.get_available_variables()
-    print(f"Available variables: {available_vars}")
-    
-    # Get summary
     summary = runner.get_summary()
-    print(f"Summary: {summary}")
-    
-    # Get zone temperatures
     zone_results = runner.get_zone_temperatures()
-    print(f"Zone temperature data keys: {list(zone_results.keys())}")
-    
-    # Get district heating
     heating_results = runner.get_district_heating()
-    print(f"District heating data keys: {list(heating_results.keys())}")
-    
-    # Get custom variables
     custom_results = runner.get_results(['Zone Air Relative Humidity'])
-    print(f"Custom results keys: {list(custom_results.keys())}")
     
     # Clean up
     runner.cleanup() 
