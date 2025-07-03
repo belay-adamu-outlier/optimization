@@ -28,17 +28,20 @@ def get_physical_core_count():
 
 class ParallelTaskRunner:
     """
-    A generic runner that executes a function across many scenarios in parallel,
+    A generic runner that executes functions across many scenarios in parallel,
     using callbacks to immediately fill freed worker slots without polling.
+    Each function is paired with its corresponding scenario.
     """
 
-    def __init__(self, func, num_workers=None):
+    def __init__(self, func_scenario_pairs, num_workers=None):
         """
-        :param func: callable that accepts one scenario and returns a result
+        :param func_scenario_pairs: list of (func, scenario) tuples where func is a callable 
+                                   that accepts one scenario and returns a result
         :param num_workers: optional int. If None, uses physical_cores.
                             Must be >=1 and <= physical_cores.
         """
-        self.func = func
+        self.func_scenario_pairs = func_scenario_pairs
+        
         physical_cores = get_physical_core_count()
         print(f"Physical cores: {physical_cores}")
         # Use all available physical cores
@@ -55,18 +58,22 @@ class ParallelTaskRunner:
 
         self.num_workers = num_workers
 
-    def run(self, scenarios):
+    def run(self):
         """
-        Execute func(scenario) for each scenario in the list, in parallel.
+        Execute func(scenario) for each function-scenario pair in the list, in parallel.
 
-        :param scenarios: list of scenario objects
         :return: list of results in order of completion
         """
-        total = len(scenarios)
+        total = len(self.func_scenario_pairs)
         if total == 0:
             return []
 
-        pending = list(scenarios)
+        # Use a generator to avoid loading all data into memory at once
+        def pending_generator():
+            for func, scenario in self.func_scenario_pairs:
+                yield func, scenario
+        
+        pending_gen = pending_generator()
         results = []
         completed = 0
         done_event = threading.Event()
@@ -77,22 +84,29 @@ class ParallelTaskRunner:
             nonlocal completed
             results.append(result)
             completed += 1
-            # Dispatch next scenario if any remain
-            if pending:
-                next_scenario = pending.pop(0)
-                pool.apply_async(self.func,
+            # Dispatch next function-scenario pair if any remain
+            try:
+                next_func, next_scenario = next(pending_gen)
+                pool.apply_async(next_func,
                                  args=(next_scenario,),
                                  callback=_on_complete)
+            except StopIteration:
+                # No more tasks to dispatch
+                pass
             # Signal when all done
             if completed == total:
                 done_event.set()
 
         # Seed initial jobs
         for _ in range(min(self.num_workers, total)):
-            scenario = pending.pop(0)
-            pool.apply_async(self.func,
-                             args=(scenario,),
-                             callback=_on_complete)
+            try:
+                func, scenario = next(pending_gen)
+                pool.apply_async(func,
+                                 args=(scenario,),
+                                 callback=_on_complete)
+            except StopIteration:
+                # Fewer tasks than workers
+                break
 
         # Wait until all callbacks signal completion
         done_event.wait()
