@@ -1,199 +1,303 @@
 import os
 import csv
-from datetime import datetime
-from parallel_task_runner import ParallelTaskRunner
-from eplus_runner import EnergyPlusRunner
+import json
+from typing import Dict, List, Tuple, Any, Generator, Optional
+from eppy.modeleditor import IDF
+import pandas as pd
 
 
-def run_simulation_task(scenario):
+def initialize_idf(path_to_idf: str, path_to_idd: str, weather_file: str):
     """
-    Run a single EnergyPlus simulation based on the provided scenario.
-    This function is designed to work with ParallelTaskRunner.
+    Initialize an IDF object with the specified IDF file, IDD file, and weather file.
     
-    :param scenario: Dictionary containing simulation parameters
-                    (idf_file, weather_file, idd_file)
-    :return: Dictionary with simulation results
+    Args:
+        path_to_idf: Path to the IDF file
+        path_to_idd: Path to the IDD file
+        weather_file: Path to the weather file
+    
+    Returns:
+        IDF object initialized with the specified files
     """
+    # Set the IDD file
+    IDF.setiddname(path_to_idd)
+    
+    # Create IDF object with IDF file and weather file
+    idf = IDF(path_to_idf, weather_file)
+    
+    return idf
+
+
+def extract_building_parameters(parameters_to_be_extracted: List[str], idf) -> Dict[str, Any]:
+    """
+    Extract all objects from the parameters_to_be_extracted list from the IDF.
+    
+    Args:
+        parameters_to_be_extracted: List of parameter names to extract
+        idf: IDF object to extract parameters from
+    
+    Returns:
+        Dictionary containing the extracted parameters and their values
+    """
+    extracted_parameters = {}
+    
+    for param_name in parameters_to_be_extracted:
+        try:
+            # Get all objects of this type from the IDF
+            objects = idf.idfobjects[param_name]
+            
+            if objects:
+                # Store all objects of this type
+                extracted_parameters[param_name] = objects
+            else:
+                # Store empty list if no objects found
+                extracted_parameters[param_name] = []
+                
+        except KeyError:
+            # Parameter type not found in IDF
+            extracted_parameters[param_name] = []
+    
+    return extracted_parameters
+
+
+def modify_model(idf, modifications: Dict[str, Any]):
+    """
+    Iterate through the modifications and modify the IDF model.
+    
+    Args:
+        idf: IDF object to modify
+        modifications: Dictionary containing modifications to apply
+    
+    Returns:
+        Modified IDF object
+    """
+    # Modify the original IDF directly
+    modified_idf = idf
+    
+    for modification_type, modification_data in modifications.items():
+        if modification_type == "json_modifications":
+            # Handle JSON-style modifications
+            from eppy import json_functions
+            json_functions.updateidf(modified_idf, modification_data)
+            
+        elif modification_type == "object_modifications":
+            # Handle direct object modifications
+            for object_type, object_modifications in modification_data.items():
+                if object_type in modified_idf.idfobjects:
+                    for obj_name, field_modifications in object_modifications.items():
+                        # Find the object by name
+                        for obj in modified_idf.idfobjects[object_type]:
+                            if hasattr(obj, 'Name') and obj.Name == obj_name:
+                                # Apply field modifications
+                                for field_name, new_value in field_modifications.items():
+                                    if hasattr(obj, field_name):
+                                        setattr(obj, field_name, new_value)
+                                break
+                                
+        elif modification_type == "add_objects":
+            # Handle adding new objects
+            for object_type, new_objects in modification_data.items():
+                for new_object_data in new_objects:
+                    # Create new object and add to IDF
+                    new_obj = modified_idf.newidfobject(object_type)
+                    for field_name, value in new_object_data.items():
+                        if hasattr(new_obj, field_name):
+                            setattr(new_obj, field_name, value)
+                            
+        elif modification_type == "remove_objects":
+            # Handle removing objects
+            for object_type, object_names in modification_data.items():
+                if object_type in modified_idf.idfobjects:
+                    objects_to_remove = []
+                    for obj in modified_idf.idfobjects[object_type]:
+                        if hasattr(obj, 'Name') and obj.Name in object_names:
+                            objects_to_remove.append(obj)
+                    
+                    # Remove the objects
+                    for obj in objects_to_remove:
+                        modified_idf.removeidfobject(obj)
+    
+    return modified_idf
+
+
+def create_simulation_scenarios(path_to_idf: str, path_to_idd: str, weather_file: str, 
+                               modification_list: List[Dict[str, Any]]) -> Generator[Tuple[Any, Dict[str, Any]], None, None]:
+    """
+    Iterate through modification_list and using generators returns a tuple of modify_model functions
+    that will be called when scenario is needed.
+    
+    Args:
+        path_to_idf: Path to the IDF file
+        path_to_idd: Path to the IDD file
+        weather_file: Path to the weather file
+        modification_list: List of modification dictionaries
+    
+    Yields:
+        Tuple of (modify_model_function, scenario_data) where modify_model_function
+        is a callable that will modify the IDF when called
+    """
+    for i, modifications in enumerate(modification_list):
+        def create_modify_function(mods, scenario_id=i):
+            def modify_function():
+                # Initialize IDF
+                idf = initialize_idf(path_to_idf, path_to_idd, weather_file)
+                # Apply modifications
+                modified_idf = modify_model(idf, mods)
+                return modified_idf, scenario_id
+            return modify_function
+        
+        scenario_data = {
+            'scenario_id': i,
+            'modifications': modifications,
+            'description': modifications.get('description', f'Scenario {i}')
+        }
+        
+        yield create_modify_function(modifications), scenario_data
+
+
+def get_simulation_result(idf, results: List[str]) -> Dict[str, Any]:
+    """
+    Simulate IDF and iterate through the results to extract results from CSV and/or HTML files.
+    
+    Args:
+        idf: IDF object to simulate
+        results: List of result types to extract (e.g., ['csv', 'html', 'sql'])
+    
+    Returns:
+        Dictionary containing the extracted results
+    """
+    # Run the simulation
     try:
-        # Extract parameters from scenario
-        idf_file = scenario['idf_file']
-        weather_file = scenario['weather_file']
-        idd_file = scenario['idd_file']
-        
-        # Create runner instance
-        runner = EnergyPlusRunner(idd_file)
-        
-        # Run simulation
-        runner.run_simulation(idf_file, weather_file)
-        
-        # Extract results
-        zone_temps = runner.get_zone_temperatures()
-        district_heating = runner.get_district_heating()
-        
-        # Get summary info
-        summary = runner.get_summary()
-        
-        # Clean up
-        runner.cleanup()
-        
-        # Return results with metadata
-        return {
-            'idf_file': idf_file,
-            'weather_file': weather_file,
-            'simulation_success': True,
-            'total_records': summary['total_records'] if summary else 0,
-            'zone_temperature_columns': list(zone_temps.keys()),
-            'district_heating_columns': list(district_heating.keys()),
-            'zone_temperatures': zone_temps,
-            'district_heating': district_heating,
-            'timestamp': zone_temps.get('timestamp', []),
-            'error_message': None
-        }
-        
+        idf.run()
+        simulation_successful = True
     except Exception as e:
-        # Return error information
+        simulation_successful = False
         return {
-            'idf_file': scenario.get('idf_file', 'unknown'),
-            'weather_file': scenario.get('weather_file', 'unknown'),
-            'simulation_success': False,
-            'total_records': 0,
-            'zone_temperature_columns': [],
-            'district_heating_columns': [],
-            'zone_temperatures': {},
-            'district_heating': {},
-            'timestamp': [],
-            'error_message': str(e)
+            'success': False,
+            'error': str(e),
+            'results': {}
         }
-
-
-def create_simulation_tasks(idf_files, weather_file, idd_file):
-    """
-    Create a list of simulation task pairs for parallel execution.
     
-    :param idf_files: List of IDF file paths
-    :param weather_file: Path to weather file
-    :param idd_file: Path to IDD file
-    :return: List of (function, scenario) tuples for ParallelTaskRunner
-    """
-    tasks = []
-    for idf_file in idf_files:
-        # Create scenario dictionary with simulation parameters
-        scenario = {
-            'idf_file': idf_file,
-            'weather_file': weather_file,
-            'idd_file': idd_file
-        }
-        # Pair the simulation function with its scenario
-        tasks.append((run_simulation_task, scenario))
-    return tasks
-
-
-def save_results_to_csv(results, output_csv_file):
-    """
-    Save simulation results to CSV file.
+    extracted_results = {}
     
-    :param results: List of simulation result dictionaries
-    :param output_csv_file: Path to output CSV file
-    """
-    if not results:
-        print("No results to save")
-        return
+    # Get the output directory from the IDF run
+    output_directory = idf.run_output_directory if hasattr(idf, 'run_output_directory') else 'run_outputs'
     
-    # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
-    
-    # Write results to CSV
-    with open(output_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-        # Define fieldnames for the CSV
-        fieldnames = [
-            'idf_file', 'weather_file', 'simulation_success', 'total_records',
-            'zone_temperature_columns', 'district_heating_columns', 'error_message'
-        ]
-        
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        
-        for result in results:
-            # Write summary row
-            summary_row = {
-                'idf_file': result['idf_file'],
-                'weather_file': result['weather_file'],
-                'simulation_success': result['simulation_success'],
-                'total_records': result['total_records'],
-                'zone_temperature_columns': ', '.join(result['zone_temperature_columns']),
-                'district_heating_columns': ', '.join(result['district_heating_columns']),
-                'error_message': result['error_message']
-            }
-            writer.writerow(summary_row)
-    
-    print(f"Results saved to: {output_csv_file}")
-
-
-def create_detailed_results_csv(results, output_csv_file):
-    """
-    Create a detailed CSV with all time series data.
-    
-    :param results: List of simulation result dictionaries
-    :param output_csv_file: Path to output CSV file
-    """
-    if not results:
-        return
-    
-    # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(output_csv_file), exist_ok=True)
-    
-    with open(output_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = None
-        
-        for result in results:
-            if not result['simulation_success'] or not result['timestamp']:
-                continue
+    for result_type in results:
+        if result_type.lower() == 'csv':
+            # Extract CSV results
+            csv_results = extract_csv_results(output_directory)
+            extracted_results['csv'] = csv_results
             
-            # Get all data columns
-            all_data = {}
-            all_data.update(result['zone_temperatures'])
-            all_data.update(result['district_heating'])
+        elif result_type.lower() == 'html':
+            # Extract HTML results
+            html_results = extract_html_results(output_directory)
+            extracted_results['html'] = html_results
             
-            if not all_data:
-                continue
+        elif result_type.lower() == 'sql':
+            # Extract SQL results
+            sql_results = extract_sql_results(output_directory)
+            extracted_results['sql'] = sql_results
             
-            # Create fieldnames for this result
-            if writer is None:
-                fieldnames = ['idf_file', 'timestamp'] + list(all_data.keys())
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-            
-            # Write data rows
-            for i, timestamp in enumerate(result['timestamp']):
-                row = {'idf_file': result['idf_file'], 'timestamp': timestamp}
-                for col, data in all_data.items():
-                    if col != 'timestamp' and i < len(data):
-                        row[col] = data[i]
-                writer.writerow(row)
+        elif result_type.lower() == 'eso':
+            # Extract ESO results
+            eso_results = extract_eso_results(output_directory)
+            extracted_results['eso'] = eso_results
     
-    print(f"Detailed results saved to: {output_csv_file}")
+    return {
+        'success': simulation_successful,
+        'output_directory': output_directory,
+        'results': extracted_results
+    }
 
 
-def print_simulation_summary(results):
-    """
-    Print a summary of simulation results.
+def extract_csv_results(output_directory: str) -> Dict[str, Any]:
+    """Extract results from CSV files in the output directory."""
+    csv_results = {}
     
-    :param results: List of simulation result dictionaries
-    """
-    if not results:
-        print("No results to summarize")
-        return
+    if not os.path.exists(output_directory):
+        return csv_results
     
-    successful_sims = sum(1 for r in results if r['simulation_success'])
-    failed_sims = len(results) - successful_sims
+    for filename in os.listdir(output_directory):
+        if filename.endswith('.csv'):
+            filepath = os.path.join(output_directory, filename)
+            try:
+                # Read CSV file
+                df = pd.read_csv(filepath)
+                csv_results[filename] = {
+                    'data': df.to_dict('records'),
+                    'columns': df.columns.tolist(),
+                    'shape': df.shape
+                }
+            except Exception as e:
+                csv_results[filename] = {'error': str(e)}
     
-    print(f"\nSimulation Summary:")
-    print(f"Total simulations: {len(results)}")
-    print(f"Successful: {successful_sims}")
-    print(f"Failed: {failed_sims}")
+    return csv_results
+
+
+def extract_html_results(output_directory: str) -> Dict[str, Any]:
+    """Extract results from HTML files in the output directory."""
+    html_results = {}
     
-    if failed_sims > 0:
-        print(f"\nFailed simulations:")
-        for result in results:
-            if not result['simulation_success']:
-                print(f"  {os.path.basename(result['idf_file'])}: {result['error_message']}") 
+    if not os.path.exists(output_directory):
+        return html_results
+    
+    for filename in os.listdir(output_directory):
+        if filename.endswith('.html') or filename.endswith('.htm'):
+            filepath = os.path.join(output_directory, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                html_results[filename] = {
+                    'content': html_content,
+                    'size': len(html_content)
+                }
+            except Exception as e:
+                html_results[filename] = {'error': str(e)}
+    
+    return html_results
+
+
+def extract_sql_results(output_directory: str) -> Dict[str, Any]:
+    """Extract results from SQL files in the output directory."""
+    sql_results = {}
+    
+    if not os.path.exists(output_directory):
+        return sql_results
+    
+    for filename in os.listdir(output_directory):
+        if filename.endswith('.sql'):
+            filepath = os.path.join(output_directory, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    sql_content = f.read()
+                sql_results[filename] = {
+                    'content': sql_content,
+                    'size': len(sql_content)
+                }
+            except Exception as e:
+                sql_results[filename] = {'error': str(e)}
+    
+    return sql_results
+
+
+def extract_eso_results(output_directory: str) -> Dict[str, Any]:
+    """Extract results from ESO files in the output directory."""
+    eso_results = {}
+    
+    if not os.path.exists(output_directory):
+        return eso_results
+    
+    for filename in os.listdir(output_directory):
+        if filename.endswith('.eso'):
+            filepath = os.path.join(output_directory, filename)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    eso_content = f.read()
+                eso_results[filename] = {
+                    'content': eso_content,
+                    'size': len(eso_content)
+                }
+            except Exception as e:
+                eso_results[filename] = {'error': str(e)}
+    
+    return eso_results
