@@ -1,0 +1,92 @@
+{
+  "external_walls": [
+    {
+      "name": "R3 - Wall"
+    },
+    {
+      "name": "R9 - Wall"
+    },
+    {
+      "name": "R17 - Wall"
+    },
+    {
+      "name": "R22 - Wall"
+    },
+    {
+      "name": "R28 - Wall"
+    },
+    {
+      "name": "R35 - Wall"
+    },
+    {
+      "name": "R41 - Wall"
+    },
+    {
+      "name": "R47 - Wall"
+    },
+    {
+      "name": "R54 - Wall"
+    },
+    {
+      "name": "R60 - Wall"
+    }
+  ],
+  "roofs": [
+    {
+      "name": "R3 - Roof"
+    },
+    {
+      "name": "R10 - Roof"
+    },
+    {
+      "name": "R18 - Roof"
+    },
+    {
+      "name": "R25 - Roof"
+    },
+    {
+      "name": "R33 - Roof"
+    },
+    {
+      "name": "R 40 - Roof"
+    },
+    {
+      "name": "R 48 - Roof"
+    },
+    {
+      "name": "R 55 - Roof"
+    },
+    {
+      "name": "R 63 - Roof"
+    },
+    {
+      "name": "R 70 - Roof"
+    }
+  ],
+  "windows": [
+    {
+      "name": "Dbl LoE Elec Ref Colored 6mm/13m Arg - 1001"
+    },
+    {
+      "name": "Dbl LoE (e2=.1) Tint 6mm/13mm Air - 1002"
+    },
+    {
+      "name": "Dbl LoE Spec Sel Tint 6mm/13mm Arg - 1003"
+    },
+    {
+      "name": "Trp LoE Film (55) Bronze 6mm/6mm Air - 1004"
+    },
+    {
+      "name": "Dbl LoE Elec Ref Colored 6mm/13mm Air - 1005"
+    },
+    {
+      "name": "SageGlass Climatop Classic SR2.0 No Tint - 1006"
+    },
+    {
+      "name": "Dbl LoE (e2=.1) Tint 6mm/13mm Arg - 1007"
+    },
+    {
+      "name": "SageGlass Climatop Blue No Tint - 1008"
+    }
+  ]
+}
