@@ -1,8 +1,5 @@
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple
-import os
+from typing import Dict, List
 import re
 
 # Pre-compile regex patterns for performance
@@ -12,153 +9,6 @@ DATA_PATTERN = re.compile(r'^\d+,[-+]?\d*\.?\d+')
 # Constants for ASHRAE 55 Adaptive method
 ASHRAE_ALPHA = 0.31
 ASHRAE_BETA = 17.8
-
-def parse_eso_file(eso_file_path: str) -> Tuple[Dict[str, List[float]], List[datetime], Dict[str, int]]:
-    """
-    Parse EnergyPlus .eso file to extract zone temperatures and outdoor air temperature.
-    
-    Args:
-        eso_file_path: Path to the .eso file
-        
-    Returns:
-        Tuple of (temperature_data, timestamps, variable_mapping)
-    """
-    temperature_data = {}
-    timestamps = []
-    variable_mapping = {}
-    
-    with open(eso_file_path, 'r') as file:
-        lines = file.readlines()
-    
-    # First pass: find variable definitions and build mapping
-    for line in lines:
-        line = line.strip()
-        if not line or not ',' in line:
-            continue
-        parts = line.split(',')
-        if len(parts) < 4:
-            continue
-        try:
-            var_id = int(parts[0])
-        except ValueError:
-            continue  # Skip lines where first field is not an integer
-        zone_or_env = parts[2].strip()
-        var_name = parts[3].strip()
-        # Match outdoor air temperature
-        if 'Site Outdoor Air Drybulb Temperature' in var_name:
-            variable_mapping['outdoor'] = var_id
-        # Match all zone mean air temperature variables (hourly only)
-        if 'Zone Mean Air Temperature [C]' in var_name and '!Hourly' in var_name:
-            # Exclude zones with names containing Corridor, Elevator, Stairs (case-insensitive)
-            if any(excl.lower() in zone_or_env.lower() for excl in ['corridor', 'elevator', 'stairs']):
-                continue
-            zone_key = f'zone_{zone_or_env}'
-            variable_mapping[zone_key] = var_id
-    
-    # Second pass: extract data
-    current_date = None
-    
-    # Track data for each variable
-    for var_name in variable_mapping:
-        temperature_data[var_name] = []
-    
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-            
-        # Check if this is a timestamp line (format: YYYY,MM,DD,HH,MM,SS)
-        if re.match(r'^\d{4},\d{1,2},\d{1,2},\d{1,2},\d{1,2},\d{1,2}', line):
-            parts = line.split(',')
-            year, month, day, hour, minute, second = map(int, parts[:6])
-            current_date = datetime(year, month, day, hour, minute, second)
-            timestamps.append(current_date)
-        # Check if this is a data line (format: VAR_ID,VALUE)
-        elif re.match(r'^\d+,[-+]?\d*\.?\d+', line):
-            parts = line.split(',')
-            var_id = int(parts[0])
-            value = float(parts[1])
-            for var_name, vid in variable_mapping.items():
-                if vid == var_id:
-                    if var_name in temperature_data:
-                        temperature_data[var_name].append(value)
-                    break
-    
-    # Generate timestamps for variables that don't have explicit timestamp lines
-    for var_name, values in temperature_data.items():
-        if len(values) > 0 and len(timestamps) == 0:
-            start_date = datetime(2021, 1, 1, 0, 0, 0)  # Assuming 2021 based on weather file
-            generated_timestamps = []
-            for i in range(len(values)):
-                timestamp = start_date + timedelta(hours=i)
-                generated_timestamps.append(timestamp)
-            if len(timestamps) == 0:
-                timestamps.extend(generated_timestamps)
-            break
-    
-    return temperature_data, timestamps, variable_mapping
-
-
-def extract_zone_temperatures(output_directory: str, excluded_zones: List[str] = None) -> Dict[str, pd.DataFrame]:
-    """
-    Extract zone mean air temperatures from EnergyPlus .eso output file.
-    
-    Args:
-        output_directory: Directory containing EnergyPlus output files
-        excluded_zones: List of zone names to exclude from analysis
-    
-    Returns:
-        Dictionary with zone names as keys and temperature DataFrames as values
-    """
-    if excluded_zones is None:
-        excluded_zones = ['Corridor', 'Elevator', 'Stairs']
-    
-    # Look for .eso file
-    eso_file = os.path.join(output_directory, 'eplusout.eso')
-    
-    if not os.path.exists(eso_file):
-        raise FileNotFoundError(f"EnergyPlus .eso file not found: {eso_file}")
-    
-    # Parse the .eso file
-    temperature_data, timestamps, variable_mapping = parse_eso_file(eso_file)
-    
-    # Convert to DataFrames
-    zone_temps = {}
-    
-    for var_name, values in temperature_data.items():
-        if var_name.startswith('zone_'):
-            zone_name = var_name.replace('zone_', '')
-            
-            # Create DataFrame with timestamps and temperatures
-            df = pd.DataFrame({
-                'timestamp': timestamps[:len(values)],
-                'temperature': values
-            })
-            # Ensure timestamp is datetime
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            # Add date columns for easier filtering
-            df['date'] = df['timestamp'].dt.date
-            df['month'] = df['timestamp'].dt.month
-            df['day'] = df['timestamp'].dt.day
-            df['hour'] = df['timestamp'].dt.hour
-            
-            zone_temps[zone_name] = df
-    
-    # Also extract outdoor temperature
-    if 'outdoor' in temperature_data:
-        outdoor_df = pd.DataFrame({
-            'timestamp': timestamps[:len(temperature_data['outdoor'])],
-            'temperature': temperature_data['outdoor']
-        })
-        outdoor_df['timestamp'] = pd.to_datetime(outdoor_df['timestamp'])
-        outdoor_df['date'] = outdoor_df['timestamp'].dt.date
-        outdoor_df['month'] = outdoor_df['timestamp'].dt.month
-        outdoor_df['day'] = outdoor_df['timestamp'].dt.day
-        outdoor_df['hour'] = outdoor_df['timestamp'].dt.hour
-        
-        zone_temps['outdoor'] = outdoor_df
-    
-    return zone_temps
 
 
 def calculate_ashrae_adaptive_threshold(outdoor_temps: pd.Series, timestamps: pd.Series) -> pd.Series:
@@ -225,33 +75,23 @@ def calculate_overheating_hours(zone_temps: pd.DataFrame, threshold_temps: pd.Se
     return overheating_hours
 
 
-def perform_overheating_analysis(output_directory: str, 
-                                excluded_zones: List[str] = None,
-                                summer_months: List[int] = None) -> dict:
+def analyze_overheating(temp_data: Dict[str, pd.DataFrame], 
+                       summer_months: List[int] | None = None) -> dict:
     """
-    Perform ASHRAE 55 Adaptive 80% overheating analysis.
+    Perform ASHRAE 55 Adaptive 80% overheating analysis on temperature data.
     
     Args:
-        output_directory: Directory containing EnergyPlus output files
-        excluded_zones: List of zone names to exclude from analysis
+        temp_data: Dictionary with zone names as keys and temperature DataFrames as values
         summer_months: List of months to consider for summer analysis (default: May-Sep)
         
     Returns:
         Dictionary with analysis results
     """
-    if excluded_zones is None:
-        excluded_zones = ['Corridor', 'Elevator', 'Stairs']
-    
     if summer_months is None:
         summer_months = [5, 6, 7, 8, 9]  # May to September
     
-    print(f"Extracting temperature data from {output_directory}...")
-    
-    # Extract temperature data
-    temp_data = extract_zone_temperatures(output_directory, excluded_zones)
-    
     if not temp_data:
-        raise ValueError("No temperature data found")
+        raise ValueError("No temperature data provided")
     
     # Get outdoor temperature data
     if 'outdoor' not in temp_data:
@@ -268,7 +108,10 @@ def perform_overheating_analysis(output_directory: str,
     print(f"Found {len(summer_outdoor)} hours of summer data")
     
     # Calculate adaptive thresholds
-    threshold_temps = calculate_ashrae_adaptive_threshold(summer_outdoor['temperature'], summer_outdoor['timestamp'])
+    threshold_temps = calculate_ashrae_adaptive_threshold(
+        pd.Series(summer_outdoor['temperature']), 
+        pd.Series(summer_outdoor['timestamp'])
+    )
     
     # Calculate overheating for each zone
     zone_results = {}
@@ -286,7 +129,7 @@ def perform_overheating_analysis(output_directory: str,
             continue
         
         # Calculate overheating hours
-        overheating_hours = calculate_overheating_hours(summer_zone, threshold_temps)
+        overheating_hours = calculate_overheating_hours(pd.DataFrame(summer_zone), threshold_temps)
         
         zone_results[zone_name] = {
             'overheating_hours': overheating_hours,
@@ -306,11 +149,11 @@ def perform_overheating_analysis(output_directory: str,
         'zone_count': zone_count,
         'average_overheating_hours': average_overheating_hours,
         'summer_months': summer_months,
-        'excluded_zones': excluded_zones,
         'analysis_period': f"{len(summer_outdoor)} hours ({summer_months[0]}-{summer_months[-1]})"
     }
     
     return results
+
 
 
 def print_overheating_analysis_results(results: dict) -> None:
@@ -326,7 +169,8 @@ def print_overheating_analysis_results(results: dict) -> None:
     
     print(f"\nAnalysis Period: {results['analysis_period']}")
     print(f"Summer Months: {results['summer_months']}")
-    print(f"Excluded Zones: {results['excluded_zones']}")
+    if 'excluded_zones' in results:
+        print(f"Excluded Zones: {results['excluded_zones']}")
     print(f"Total Zones Analyzed: {results['zone_count']}")
     
     print(f"\nOVERALL RESULTS:")
@@ -344,81 +188,3 @@ def print_overheating_analysis_results(results: dict) -> None:
     
     print("-" * 80)
     print(f"\nAnalysis completed successfully!")
-
-
-def perform_overheating_analysis_optimized(output_directory: str, 
-                                         excluded_zones: List[str] = None,
-                                         summer_months: List[int] = None) -> dict:
-    """
-    Optimized version of ASHRAE 55 Adaptive 80% overheating analysis for high-frequency calls.
-    
-    Args:
-        output_directory: Directory containing EnergyPlus output files
-        excluded_zones: List of zone names to exclude from analysis
-        summer_months: List of months to consider for summer analysis (default: May-Sep)
-        
-    Returns:
-        Dictionary with analysis results (minimal data for optimization)
-    """
-    if excluded_zones is None:
-        excluded_zones = ['Corridor', 'Elevator', 'Stairs']
-    
-    if summer_months is None:
-        summer_months = [5, 6, 7, 8, 9]  # May to September
-    
-    # Extract temperature data using the working function
-    temp_data = extract_zone_temperatures(output_directory, excluded_zones)
-    
-    if not temp_data:
-        raise ValueError("No temperature data found")
-    
-    # Get outdoor temperature data
-    if 'outdoor' not in temp_data:
-        raise ValueError("Outdoor temperature data not found")
-    
-    outdoor_data = temp_data['outdoor']
-    
-    # Filter for summer months using numpy operations for speed
-    summer_mask = outdoor_data['month'].isin(summer_months)
-    summer_outdoor = outdoor_data[summer_mask]
-    
-    if len(summer_outdoor) == 0:
-        raise ValueError(f"No data found for summer months {summer_months}")
-    
-    # Calculate adaptive thresholds
-    threshold_temps = calculate_ashrae_adaptive_threshold(summer_outdoor['temperature'], summer_outdoor['timestamp'])
-    
-    # Calculate overheating for each zone using numpy operations
-    total_overheating_hours = 0
-    zone_count = 0
-    
-    for zone_name, zone_data in temp_data.items():
-        if zone_name == 'outdoor':
-            continue
-            
-        # Filter zone data for summer months
-        summer_zone = zone_data[summer_mask]
-        
-        if len(summer_zone) == 0:
-            continue
-        
-        # Calculate overheating hours using numpy for speed
-        min_length = min(len(summer_zone), len(threshold_temps))
-        zone_temp_series = summer_zone['temperature'].iloc[:min_length].values
-        threshold_series = threshold_temps.iloc[:min_length].values
-        
-        # Count hours where zone temperature exceeds threshold using numpy
-        overheating_hours = np.sum(zone_temp_series > threshold_series)
-        
-        total_overheating_hours += overheating_hours
-        zone_count += 1
-    
-    # Calculate average overheating hours
-    average_overheating_hours = total_overheating_hours / zone_count if zone_count > 0 else 0
-    
-    # Return minimal results for optimization
-    return {
-        'average_overheating_hours': average_overheating_hours,
-        'total_overheating_hours': total_overheating_hours,
-        'zone_count': zone_count
-    } 
