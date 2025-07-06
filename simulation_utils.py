@@ -1,6 +1,4 @@
 import os
-import csv
-import json
 from typing import Dict, List, Tuple, Any, Generator, Optional
 from eppy.modeleditor import IDF
 import pandas as pd
@@ -301,3 +299,87 @@ def extract_eso_results(output_directory: str) -> Dict[str, Any]:
                 eso_results[filename] = {'error': str(e)}
     
     return eso_results
+
+
+def apply_external_window_construction(idf, construction_name: str):
+    """
+    Apply a construction to all external windows in the IDF.
+    
+    Args:
+        idf: IDF object to modify
+        construction_name: Name of the construction to apply
+    
+    Returns:
+        Modified IDF object
+    """
+    # Find all fenestration surfaces (windows)
+    if 'FENESTRATIONSURFACE:DETAILED' in idf.idfobjects:
+        for window in idf.idfobjects['FENESTRATIONSURFACE:DETAILED']:
+            # Check if it's an external window
+            if hasattr(window, 'Surface_Type') and window.Surface_Type == 'Window':
+                # Apply the construction
+                window.Construction_Name = construction_name
+    
+    # Also check for simple fenestration surfaces
+    if 'FENESTRATIONSURFACE:SIMPLE' in idf.idfobjects:
+        for window in idf.idfobjects['FENESTRATIONSURFACE:SIMPLE']:
+            # Apply the construction
+            window.Construction_Name = construction_name
+    
+    return idf
+
+
+def apply_roof_construction(idf, construction_name: str):
+    """
+    Apply a construction to all roof surfaces in the IDF.
+    
+    Args:
+        idf: IDF object to modify
+        construction_name: Name of the construction to apply
+    
+    Returns:
+        Modified IDF object
+    """
+    # Find all building surfaces
+    if 'BUILDINGSURFACE:DETAILED' in idf.idfobjects:
+        for surface in idf.idfobjects['BUILDINGSURFACE:DETAILED']:
+            # Check if it's a roof
+            if hasattr(surface, 'Surface_Type') and surface.Surface_Type == 'Roof':
+                # Apply the construction
+                surface.Construction_Name = construction_name
+    
+    # Also check for simple building surfaces
+    if 'BUILDINGSURFACE:SIMPLE' in idf.idfobjects:
+        for surface in idf.idfobjects['BUILDINGSURFACE:SIMPLE']:
+            # Check if it's a roof
+            if hasattr(surface, 'Surface_Type') and surface.Surface_Type == 'Roof':
+                # Apply the construction
+                surface.Construction_Name = construction_name
+    
+    return idf
+
+
+def apply_window_construction(idf, construction_name: str):
+    """
+    Apply a construction to all windows (both internal and external) in the IDF.
+    
+    Args:
+        idf: IDF object to modify
+        construction_name: Name of the construction to apply
+    
+    Returns:
+        Modified IDF object
+    """
+    # Find all fenestration surfaces (windows)
+    if 'FENESTRATIONSURFACE:DETAILED' in idf.idfobjects:
+        for window in idf.idfobjects['FENESTRATIONSURFACE:DETAILED']:
+            # Apply the construction to all windows
+            window.Construction_Name = construction_name
+    
+    # Also check for simple fenestration surfaces
+    if 'FENESTRATIONSURFACE:SIMPLE' in idf.idfobjects:
+        for window in idf.idfobjects['FENESTRATIONSURFACE:SIMPLE']:
+            # Apply the construction to all windows
+            window.Construction_Name = construction_name
+    
+    return idf
