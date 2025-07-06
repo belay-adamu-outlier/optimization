@@ -630,3 +630,60 @@ def extract_zone_temperatures(temperature_data: Dict[str, List[float]], timestam
     
     return zone_temps
 
+
+def extract_district_heating_from_htm(htm_file_path: str) -> float:
+    """
+    Extract District Heating value from the End Uses table in eplustbl.htm file.
+    
+    Args:
+        htm_file_path: Path to the eplustbl.htm file
+        
+    Returns:
+        District Heating value in kWh as a float
+        
+    Raises:
+        FileNotFoundError: If the HTML file doesn't exist
+        ValueError: If the District Heating value cannot be found or parsed
+    """
+    if not os.path.exists(htm_file_path):
+        raise FileNotFoundError(f"HTML file not found: {htm_file_path}")
+    
+    district_heating_value = None
+    
+    with open(htm_file_path, 'r', encoding='utf-8') as file:
+        content = file.read()
+    
+    # Use regex to find the "Total End Uses" row and extract the District Heating value
+    # The District Heating column is the 12th column (index 11)
+    import re
+    
+    # Pattern to match the Total End Uses row and capture the 12th column value
+    pattern = r'<td[^>]*>Total End Uses</td>(?:\s*<td[^>]*>[^<]*</td>){11}\s*<td[^>]*>([^<]*)</td>'
+    match = re.search(pattern, content, re.DOTALL)
+    
+    if match:
+        value_str = match.group(1).strip()
+        try:
+            district_heating_value = float(value_str)
+        except ValueError:
+            raise ValueError(f"Could not parse District Heating value: '{value_str}'")
+    else:
+        # Alternative approach: look for the specific line with "Total End Uses"
+        lines = content.split('\n')
+        for line in lines:
+            if 'Total End Uses' in line and '<td' in line:
+                # Extract all td elements from this line
+                td_matches = re.findall(r'<td[^>]*>([^<]*)</td>', line)
+                if len(td_matches) >= 13:  # Need at least 13 columns
+                    value_str = td_matches[12].strip()  # 12th column (index 12)
+                    try:
+                        district_heating_value = float(value_str)
+                        break
+                    except ValueError:
+                        continue
+    
+    if district_heating_value is None:
+        raise ValueError("District Heating value not found in the End Uses table")
+    
+    return district_heating_value
+
