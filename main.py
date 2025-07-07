@@ -12,6 +12,7 @@ from pymoo.operators.sampling.rnd import IntegerRandomSampling
 from pymoo.optimize import minimize
 from pymoo.core.callback import Callback
 import os
+import matplotlib.pyplot as plt
 from energyplus_utils import run_simulation, analyze_simulation_results
 
 
@@ -33,6 +34,9 @@ class EvaluationCallback(Callback):
         # Initialize CSV file
         self.csv_filename = f"optimization_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         self._initialize_csv()
+        
+        # Initialize plotting
+        self._initialize_plot()
         
         # Clear screen
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -97,6 +101,10 @@ class EvaluationCallback(Callback):
         
         # Print efficiency info
         print(f"\nGeneration {self.generation}: {new_evaluations} new unique evaluations out of {len(X)} total individuals")
+        print(f"Total solutions so far: {len(self.all_results)}")
+        
+        # Update the plot
+        self._update_plot()
     
     def _x_to_params(self, x):
         """Convert optimization variables x to parameter dictionary."""
@@ -119,43 +127,43 @@ class EvaluationCallback(Callback):
     
     def _print_table(self):
         """Print Pareto optimal solutions + last 100 iterations."""
-        os.system('cls' if os.name == 'nt' else 'clear')
-        
-        print(f"{'='*140}")
+        # Don't clear screen to avoid interfering with GUI updates
+        # Just print a separator instead
+        print(f"\n{'='*100}")
         print(f"OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
-        print(f"{'='*140}")
+        print(f"{'='*100}")
         
         if not self.all_results:
             return
         
-        # Define fixed column widths with reasonable limits for terminal display
+        # More compact column widths for better terminal display
         col_widths = {
-            'external_walls': 15,
-            'roofs': 15,
-            'windows': 15,
-            'infiltration': 8,
-            'wwr_east': 8,
-            'wwr_west': 8,
-            'wwr_north': 8,
-            'wwr_south': 8
+            'external_walls': 10,
+            'roofs': 10,
+            'windows': 20,
+            'infiltration': 6,
+            'wwr_east': 6,
+            'wwr_west': 6,
+            'wwr_north': 6,
+            'wwr_south': 6
         }
         
         # Create header with fixed widths
         header_parts = [
-            f"{'Gen':<4}",
-            f"{'Iter':<5}",
+            f"{'Gen':<3}",
+            f"{'Iter':<4}",
         ]
         
         for var_name in self.variable_names:
             if var_name in col_widths:
                 header_parts.append(f"{var_name:<{col_widths[var_name]}}")
             else:
-                header_parts.append(f"{var_name:<15}")
+                header_parts.append(f"{var_name:<8}")
         
         header_parts.extend([
-            f"{'Mech_EUI':<10}",
-            f"{'Overheating':<10}",
-            f"{'Pareto':<6}"
+            f"{'Mech_EUI':<8}",
+            f"{'Overheating':<8}",
+            f"{'Pareto':<4}"
         ])
         
         header = " ".join(header_parts)
@@ -194,8 +202,8 @@ class EvaluationCallback(Callback):
             pareto_mark = "✓" if result['pareto_optimal'] else " "
             
             line_parts = [
-                f"{result['generation']:<4}",
-                f"{result['iteration']:<5}",
+                f"{result['generation']:<3}",
+                f"{result['iteration']:<4}",
             ]
             
             for var_name in self.variable_names:
@@ -208,19 +216,19 @@ class EvaluationCallback(Callback):
                             value = value[:max_width-3] + "..."
                         line_parts.append(f"{value:<{max_width}}")
                     else:
-                        if len(value) > 15:
-                            value = value[:12] + "..."
-                        line_parts.append(f"{value:<15}")
+                        if len(value) > 8:
+                            value = value[:5] + "..."
+                        line_parts.append(f"{value:<8}")
                 else:
                     if var_name in col_widths:
                         line_parts.append(f"{'':<{col_widths[var_name]}}")
                     else:
-                        line_parts.append(f"{'':<15}")
+                        line_parts.append(f"{'':<8}")
             
             line_parts.extend([
-                f"{result['mechanical_energy_use_intensity']:<10.4f}",
-                f"{result['average_overheating_hours']:<10.2f}",
-                f"{pareto_mark:<6}"
+                f"{result['mechanical_energy_use_intensity']:<8.3f}",
+                f"{result['average_overheating_hours']:<8.1f}",
+                f"{pareto_mark:<4}"
             ])
             
             line = " ".join(line_parts)
@@ -315,8 +323,91 @@ class EvaluationCallback(Callback):
                 
                 writer.writerow(row)
         
+        # Final plot update
+        self._update_plot()
+        
         print(f"\nOptimization complete! Results saved to: {self.csv_filename}")
         print(f"Pareto optimal solutions have been identified and marked in the CSV file.")
+    
+    def _initialize_plot(self):
+        """Initialize the live scatter plot."""
+        try:
+            plt.ion()  # Turn on interactive mode
+            self.fig, self.ax = plt.subplots(figsize=(10, 8))
+            self.ax.set_xlabel('Mechanical Energy Use Intensity (kWh/m²)')
+            self.ax.set_ylabel('Average Overheating Hours')
+            self.ax.set_title('Optimization Progress - Pareto Front')
+            self.ax.grid(True, alpha=0.3)
+
+            # Set default axis limits so axes are visible even with no data
+            self.ax.set_xlim(0, 1)
+            self.ax.set_ylim(0, 1)
+
+            # Create persistent scatter plot objects
+            self.scatter_all = self.ax.scatter([], [], c='lightblue', alpha=0.6, s=50, label='All Solutions')
+            self.scatter_pareto = self.ax.scatter([], [], c='red', s=100, label='Pareto Optimal')
+
+            self.ax.legend()
+            plt.tight_layout()
+            plt.show()
+            print("Plot initialized successfully!")
+        except Exception as e:
+            print(f"Error initializing plot: {e}")
+            self.fig = None
+            self.ax = None
+    
+    def _update_plot(self):
+        """Update the scatter plot with current data."""
+        if not self.all_results or self.fig is None or self.ax is None:
+            return
+        
+        try:
+            # Extract data
+            meui_values = [result['mechanical_energy_use_intensity'] for result in self.all_results]
+            overheating_values = [result['average_overheating_hours'] for result in self.all_results]
+            pareto_mask = [result['pareto_optimal'] for result in self.all_results]
+            
+            # Separate Pareto optimal and non-Pareto optimal solutions
+            pareto_meui = [meui_values[i] for i in range(len(meui_values)) if pareto_mask[i]]
+            pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if pareto_mask[i]]
+            
+            non_pareto_meui = [meui_values[i] for i in range(len(meui_values)) if not pareto_mask[i]]
+            non_pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if not pareto_mask[i]]
+            
+            # Update scatter plot data (don't recreate objects)
+            if non_pareto_meui:
+                self.scatter_all.set_offsets(np.column_stack([non_pareto_meui, non_pareto_overheating]))
+            else:
+                self.scatter_all.set_offsets(np.empty((0, 2)))
+            
+            if pareto_meui:
+                self.scatter_pareto.set_offsets(np.column_stack([pareto_meui, pareto_overheating]))
+            else:
+                self.scatter_pareto.set_offsets(np.empty((0, 2)))
+            
+            # Auto-adjust axis limits
+            if meui_values:
+                x_min, x_max = min(meui_values), max(meui_values)
+                y_min, y_max = min(overheating_values), max(overheating_values)
+                
+                # Add some padding
+                x_range = x_max - x_min
+                y_range = y_max - y_min
+                if x_range > 0:
+                    self.ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
+                if y_range > 0:
+                    self.ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+            
+            # Update title with generation info
+            self.ax.set_title(f'Optimization Progress - Generation {self.generation} ({len(self.all_results)} solutions)')
+            
+            # Update the plot with proper event loop breathing room
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+            plt.pause(0.01)  # Give GUI framework time to handle events
+            
+        except Exception as e:
+            print(f"Error updating plot: {e}")
 
 
 
@@ -436,7 +527,7 @@ def main():
     
     # Define algorithm with built-in duplicate elimination
     method = NSGA2(
-        pop_size=4,
+        pop_size=2,
         sampling=IntegerRandomSampling(),
         crossover=SBX(prob=0.9, eta=15, vtype=float, repair=RoundingRepair()),
         mutation=PM(prob=0.1, eta=20, vtype=float, repair=RoundingRepair()),
@@ -467,6 +558,12 @@ def main():
     print("="*80)
     print("Best solution found: %s" % res.X)
     print("Function values: %s" % res.F)
+    
+    # Keep the plot open for viewing
+    print("\nOptimization complete! Plot window will remain open.")
+    print("Close the plot window manually when done viewing.")
+    plt.ioff()  # Turn off interactive mode
+    plt.show(block=True)  # Show plot in blocking mode
 
 
 if __name__ == "__main__":
