@@ -124,7 +124,7 @@ class TestApplyInfiltrationToZones:
         
         # Mock existing infiltration
         self.mock_existing_infiltration = Mock()
-        self.mock_existing_infiltration.Zone_or_Space_Name = 'Zone1'
+        self.mock_existing_infiltration.Zone_or_ZoneList_Name = 'Zone1'
         self.mock_existing_infiltration.Design_Flow_Rate = 0.1
         self.mock_existing_infiltration.Air_Changes_per_Hour = 0.05
         
@@ -145,7 +145,7 @@ class TestApplyInfiltrationToZones:
         apply_infiltration_to_zones(self.mock_idf, infiltration_ach_50pa)
         
         # Verify existing infiltration was updated
-        assert self.mock_existing_infiltration.Design_Flow_Rate == 0.0
+        assert self.mock_existing_infiltration.Design_Flow_Rate == ''
         assert self.mock_existing_infiltration.Air_Changes_per_Hour == expected_ambient_ach
         
         # Verify new infiltration was created for Zone2

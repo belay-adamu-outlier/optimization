@@ -58,18 +58,18 @@ def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
         # Check if infiltration object already exists for this zone
         existing_infiltration = None
         for infiltration in idf.idfobjects['ZONEINFILTRATION:DESIGNFLOWRATE']:
-            if infiltration.Zone_or_Space_Name == zone_name:
+            if infiltration.Zone_or_ZoneList_Name == zone_name:
                 existing_infiltration = infiltration
                 break
         
         if existing_infiltration:
             # Update existing infiltration - clear Design_Flow_Rate and set Air_Changes_per_Hour
-            existing_infiltration.Design_Flow_Rate = 0.0
+            existing_infiltration.Design_Flow_Rate = ''
             existing_infiltration.Air_Changes_per_Hour = infiltration_ach_ambient
         else:
             # Create new infiltration object
             infiltration = idf.newidfobject('ZONEINFILTRATION:DESIGNFLOWRATE')
-            infiltration.Zone_or_Space_Name = zone_name
+            infiltration.Zone_or_ZoneList_Name = zone_name
             infiltration.Design_Flow_Rate = ''  # Clear this field
             infiltration.Air_Changes_per_Hour = infiltration_ach_ambient  # Set converted ACH
 
