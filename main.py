@@ -1,6 +1,8 @@
 import numpy as np
 import json
 import multiprocessing
+import csv
+from datetime import datetime
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.problem import Problem
 from pymoo.operators.crossover.sbx import SBX
@@ -21,6 +23,10 @@ class EvaluationCallback(Callback):
         self.all_results = []
         self.all_objectives = []  # Store all objective values for Pareto comparison
         self.unique_combinations = set()  # Track unique construction combinations
+        
+        # Initialize CSV file
+        self.csv_filename = f"optimization_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        self._initialize_csv()
         
         # Clear screen
         os.system('cls' if os.name == 'nt' else 'clear')
@@ -70,9 +76,12 @@ class EvaluationCallback(Callback):
         self._update_pareto_optimality()
         
         # Clear screen and print comprehensive table
-        self._print_comprehensive_table()
+        self._print_table()
+        
+        # Save current generation results to CSV
+        self._save_to_csv()
     
-    def _print_comprehensive_table(self):
+    def _print_table(self):
         """Print one comprehensive table with all generations."""
         os.system('cls' if os.name == 'nt' else 'clear')
         
@@ -138,6 +147,72 @@ class EvaluationCallback(Callback):
                         break
         
         return pareto_optimal
+    
+    def _initialize_csv(self):
+        """Initialize the CSV file with headers."""
+        with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Generation', 'Iteration', 'Wall', 'Roof', 'Window', 'Energy', 'Cost', 'Pareto_Optimal']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+    
+    def _save_to_csv(self):
+        """Save current generation results to CSV file."""
+        with open(self.csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Generation', 'Iteration', 'Wall', 'Roof', 'Window', 'Energy', 'Cost', 'Pareto_Optimal']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # Write only the new results from this generation
+            for result in self.all_results:
+                if result['generation'] == self.generation:
+                    writer.writerow({
+                        'Generation': result['generation'],
+                        'Iteration': result['iteration'],
+                        'Wall': result['wall'],
+                        'Roof': result['roof'],
+                        'Window': result['window'],
+                        'Energy': f"{result['energy']:.4f}",
+                        'Cost': f"{result['cost']:.2f}",
+                        'Pareto_Optimal': ''  # Leave blank until final analysis
+                    })
+    
+    def save_final_results(self):
+        """Save final results with updated Pareto optimality."""
+        # Update Pareto optimality one final time
+        self._update_pareto_optimality()
+        
+        # Read the existing CSV file and update Pareto optimal column
+        rows = []
+        with open(self.csv_filename, 'r', newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                # Find matching result in all_results to get Pareto status
+                generation = int(row['Generation'])
+                iteration = int(row['Iteration'])
+                energy = float(row['Energy'])
+                cost = float(row['Cost'])
+                
+                # Find the matching result
+                pareto_status = 'No'
+                for result in self.all_results:
+                    if (result['generation'] == generation and 
+                        result['iteration'] == iteration and
+                        abs(result['energy'] - energy) < 1e-6 and
+                        abs(result['cost'] - cost) < 1e-6):
+                        pareto_status = 'Yes' if result['pareto_optimal'] else 'No'
+                        break
+                
+                row['Pareto_Optimal'] = pareto_status
+                rows.append(row)
+        
+        # Write updated results back to the same file
+        with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['Generation', 'Iteration', 'Wall', 'Roof', 'Window', 'Energy', 'Cost', 'Pareto_Optimal']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        
+        print(f"\nOptimization complete! Results saved to: {self.csv_filename}")
+        print(f"Pareto optimal solutions have been identified and marked in the CSV file.")
 
 
 class BuildingEnvelopeProblem(Problem):
@@ -229,6 +304,9 @@ def main():
         callback=callback,
         processes=num_workers
     )
+    
+    # Save final results with updated Pareto optimality
+    callback.save_final_results()
     
     print("\n" + "="*80)
     print("FINAL RESULTS")
