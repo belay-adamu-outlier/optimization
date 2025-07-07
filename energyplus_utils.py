@@ -276,7 +276,7 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
     return idf
 
 
-def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, output_dir=None):
+def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, output_dir=None, verbose='v'):
     """
     Run EnergyPlus simulation with envelope parameter modifications.
     
@@ -294,6 +294,10 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
             - 'wwr_south': Window-to-wall ratio for south facade
         idd_path (str, optional): Path to the IDD file
         output_dir (str, optional): Directory for output files
+        verbose (str, optional): Verbosity level for EnergyPlus output:
+            - 'v': Verbose (default)
+            - 'q': Quiet (suppresses most logging)
+            - 's': Silent (minimal output)
     
     Returns:
         str: Output directory path where simulation results are stored
@@ -318,8 +322,8 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
         # Apply envelope parameters using the new modify_idf function
         idf = modify_idf(idf, envelope_parameters)
         
-        # Run simulation with specified output directory
-        idf.run(output_directory=output_dir)
+        # Run simulation with specified output directory and verbosity
+        idf.run(output_directory=output_dir, verbose=verbose)
         
         return output_dir
         
@@ -386,7 +390,7 @@ def analyze_simulation_results(output_dir):
         }
 
 
-def run_energyplus_simulation_with_analysis(idf_path, weather_path, idd_path=None, output_dir=None):
+def run_energyplus_simulation_with_analysis(idf_path, weather_path, idd_path=None, output_dir=None, verbose='v'):
     """
     Legacy function - combines run_simulation and analyze_simulation_results.
     Use the separate functions for better memory management.
@@ -396,6 +400,10 @@ def run_energyplus_simulation_with_analysis(idf_path, weather_path, idd_path=Non
         weather_path (str): Path to the weather file (.epw)
         idd_path (str, optional): Path to the IDD file. If None, eppy will try to find it automatically.
         output_dir (str, optional): Directory for output files. If None, creates a timestamped folder.
+        verbose (str, optional): Verbosity level for EnergyPlus output:
+            - 'v': Verbose (default)
+            - 'q': Quiet (suppresses most logging)
+            - 's': Silent (minimal output)
     
     Returns:
         dict: Dictionary containing simulation results, district heating, and overheating analysis
@@ -404,7 +412,7 @@ def run_energyplus_simulation_with_analysis(idf_path, weather_path, idd_path=Non
     envelope_parameters = {}
     
     # Run simulation
-    output_dir = run_simulation(idf_path, weather_path, envelope_parameters, idd_path, output_dir)
+    output_dir = run_simulation(idf_path, weather_path, envelope_parameters, idd_path, output_dir, verbose)
     
     # Analyze results
     return analyze_simulation_results(output_dir)
