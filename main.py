@@ -27,6 +27,7 @@ class EvaluationCallback(Callback):
         self.all_results = []
         self.all_objectives = []  # Store all objective values for Pareto comparison
         self.unique_combinations = set()  # Track unique combinations
+        self.generation_results = []  # Store results for current generation
         
         # Get variable names for flexible headers
         self.variable_names = list(optimization_variables.keys())
@@ -47,6 +48,9 @@ class EvaluationCallback(Callback):
         # Get current population
         X = algorithm.pop.get("X")
         F = algorithm.pop.get("F")
+        
+        # Clear generation results for new generation
+        self.generation_results = []
         
         # Store results for this generation (only new unique combinations)
         new_evaluations = 0
@@ -72,7 +76,7 @@ class EvaluationCallback(Callback):
                     'iteration': i,
                     'mechanical_energy_use_intensity': F[i, 0],
                     'average_overheating_hours': F[i, 1],
-                    'pareto_optimal': False  # Will be updated after adding to all_objectives
+                    'pareto_optimal': False  # Will be updated for display purposes
                 }
                 
                 # Add all parameters to result
@@ -80,6 +84,7 @@ class EvaluationCallback(Callback):
                     result_dict[var_name] = value
                 
                 self.all_results.append(result_dict)
+                self.generation_results.append(result_dict)
                 
                 # Store objective values for Pareto comparison
                 self.all_objectives.append([F[i, 0], F[i, 1]])
@@ -89,21 +94,24 @@ class EvaluationCallback(Callback):
                 existing_result['iteration'] = i
                 existing_result['mechanical_energy_use_intensity'] = F[i, 0]
                 existing_result['average_overheating_hours'] = F[i, 1]
+                
+                # Add to generation results for CSV
+                self.generation_results.append(existing_result)
         
-        # Now identify Pareto optimal solutions across ALL solutions found so far
-        self._update_pareto_optimality()
+        # Calculate current Pareto optimality for display purposes (not for CSV)
+        self._update_pareto_optimality_for_display()
         
         # Clear screen and print comprehensive table
         self._print_table()
         
-        # Save current generation results to CSV
+        # Save current generation results to CSV (all members of this generation)
         self._save_to_csv()
         
         # Print efficiency info
         print(f"\nGeneration {self.generation}: {new_evaluations} new unique evaluations out of {len(X)} total individuals")
         print(f"Total solutions so far: {len(self.all_results)}")
         
-        # Update the plot
+        # Update the plot at the end of each generation
         self._update_plot()
     
     def _x_to_params(self, x):
@@ -148,7 +156,7 @@ class EvaluationCallback(Callback):
             'wwr_south': 6
         }
         
-        # Create header with fixed widths
+        # Create header with fixed widths - match the data formatting exactly
         header_parts = [
             f"{'Gen':<3}",
             f"{'Iter':<4}",
@@ -163,7 +171,7 @@ class EvaluationCallback(Callback):
         header_parts.extend([
             f"{'Mech_EUI':<8}",
             f"{'Overheating':<8}",
-            f"{'Pareto':<4}"
+            f"{'Pareto':<6}"  # Increased width to match data
         ])
         
         header = " ".join(header_parts)
@@ -228,7 +236,7 @@ class EvaluationCallback(Callback):
             line_parts.extend([
                 f"{result['mechanical_energy_use_intensity']:<8.3f}",
                 f"{result['average_overheating_hours']:<8.1f}",
-                f"{pareto_mark:<4}"
+                f"{pareto_mark:<6}"  # Increased width to match header
             ])
             
             line = " ".join(line_parts)
@@ -265,6 +273,27 @@ class EvaluationCallback(Callback):
         for i, result in enumerate(self.all_results):
             result['pareto_optimal'] = pareto_optimal[i]
     
+    def _update_pareto_optimality_for_display(self):
+        """Update Pareto optimality for display purposes (scatter plot and table)."""
+        if not self.all_objectives:
+            return
+            
+        all_F = np.array(self.all_objectives)
+        n_solutions = len(all_F)
+        pareto_optimal = np.ones(n_solutions, dtype=bool)
+        
+        for i in range(n_solutions):
+            for j in range(n_solutions):
+                if i != j:
+                    # Check if solution j dominates solution i
+                    if np.all(all_F[j] <= all_F[i]) and np.any(all_F[j] < all_F[i]):
+                        pareto_optimal[i] = False
+                        break
+        
+        # Update the pareto_optimal flag in all_results for display purposes
+        for i, result in enumerate(self.all_results):
+            result['pareto_optimal'] = pareto_optimal[i]
+    
     def _initialize_csv(self):
         """Initialize the CSV file with headers."""
         with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
@@ -278,27 +307,26 @@ class EvaluationCallback(Callback):
             fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
-            # Write only the new results from this generation
-            for result in self.all_results:
-                if result['generation'] == self.generation:
-                    row = {
-                        'Generation': result['generation'],
-                        'Iteration': result['iteration'],
-                        'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                        'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                        'Pareto_Optimal': 'Yes' if result['pareto_optimal'] else 'No'
-                    }
-                    
-                    # Add all variable values
-                    for var_name in self.variable_names:
-                        if var_name in result:
-                            row[var_name] = result[var_name]
-                    
-                    writer.writerow(row)
+            # Write all results from this generation
+            for result in self.generation_results:
+                row = {
+                    'Generation': result['generation'],
+                    'Iteration': result['iteration'],
+                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
+                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
+                    'Pareto_Optimal': 'Pending'  # Will be updated at the end
+                }
+                
+                # Add all variable values
+                for var_name in self.variable_names:
+                    if var_name in result:
+                        row[var_name] = result[var_name]
+                
+                writer.writerow(row)
     
     def save_final_results(self):
         """Save final results with updated Pareto optimality."""
-        # Update Pareto optimality one final time
+        # Update Pareto optimality one final time for final CSV
         self._update_pareto_optimality()
         
         # Write all results to CSV with proper Pareto optimality
@@ -323,8 +351,15 @@ class EvaluationCallback(Callback):
                 
                 writer.writerow(row)
         
-        # Final plot update
+        # Final plot update with final Pareto optimality
         self._update_plot()
+        
+        # Update title to show final results
+        if self.ax is not None and self.fig is not None:
+            pareto_count = sum(1 for result in self.all_results if result['pareto_optimal'])
+            self.ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(self.all_results)} Total')
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
         
         print(f"\nOptimization complete! Results saved to: {self.csv_filename}")
         print(f"Pareto optimal solutions have been identified and marked in the CSV file.")
@@ -344,7 +379,7 @@ class EvaluationCallback(Callback):
             self.ax.set_ylim(0, 1)
 
             # Create persistent scatter plot objects
-            self.scatter_all = self.ax.scatter([], [], c='lightblue', alpha=0.6, s=50, label='All Solutions')
+            self.scatter_all = self.ax.scatter([], [], c='blue', alpha=0.6, s=50, label='Non-Pareto Optimal')
             self.scatter_pareto = self.ax.scatter([], [], c='red', s=100, label='Pareto Optimal')
 
             self.ax.legend()
@@ -398,8 +433,9 @@ class EvaluationCallback(Callback):
                 if y_range > 0:
                     self.ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
             
-            # Update title with generation info
-            self.ax.set_title(f'Optimization Progress - Generation {self.generation} ({len(self.all_results)} solutions)')
+            # Update title with generation info and Pareto count
+            pareto_count = sum(pareto_mask)
+            self.ax.set_title(f'Generation {self.generation} - {pareto_count} Pareto Optimal out of {len(self.all_results)} Total Solutions')
             
             # Update the plot with proper event loop breathing room
             self.fig.canvas.draw()
@@ -527,7 +563,7 @@ def main():
     
     # Define algorithm with built-in duplicate elimination
     method = NSGA2(
-        pop_size=2,
+        pop_size=4,
         sampling=IntegerRandomSampling(),
         crossover=SBX(prob=0.9, eta=15, vtype=float, repair=RoundingRepair()),
         mutation=PM(prob=0.1, eta=20, vtype=float, repair=RoundingRepair()),
@@ -538,8 +574,7 @@ def main():
     res = minimize(
         problem,
         method,
-        termination=('n_gen', 1),
-        seed=1,
+        termination=('n_gen', 5),
         save_history=True,
         callback=callback
     )
