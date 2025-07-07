@@ -14,7 +14,7 @@ def run_tests_with_coverage():
     print("Running tests with coverage...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        "test_run_energyplus.py", 
+        "test_energyplus_utils.py", 
         "--cov=energyplus_utils",
         "--cov-report=term-missing",
         "--cov-report=html",
@@ -28,7 +28,7 @@ def run_tests_verbose():
     print("Running tests with verbose output...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        "test_run_energyplus.py", 
+        "test_energyplus_utils.py", 
         "-v", 
         "-s"
     ]
@@ -40,7 +40,7 @@ def run_specific_test_class(test_class):
     print(f"Running tests for {test_class}...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        f"test_run_energyplus.py::{test_class}", 
+        f"test_energyplus_utils.py::{test_class}", 
         "-v"
     ]
     subprocess.run(cmd)
@@ -51,7 +51,7 @@ def run_specific_test(test_name):
     print(f"Running test: {test_name}...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        f"test_run_energyplus.py::{test_name}", 
+        f"test_energyplus_utils.py::{test_name}", 
         "-v", 
         "-s"
     ]
@@ -68,7 +68,7 @@ def list_available_tests():
     print("\nAvailable individual tests:")
     cmd = [
         sys.executable, "-m", "pytest", 
-        "test_run_energyplus.py", 
+        "test_energyplus_utils.py", 
         "--collect-only", 
         "-q"
     ]
@@ -103,7 +103,7 @@ def main():
         run_specific_test(sys.argv[2])
     elif option == "all":
         print("Running all tests...")
-        cmd = [sys.executable, "-m", "pytest", "test_run_energyplus.py", "-v"]
+        cmd = [sys.executable, "-m", "pytest", "test_energyplus_utils.py", "-v"]
         subprocess.run(cmd)
     else:
         print("Invalid option. Use 'python run_tests.py' for help.")

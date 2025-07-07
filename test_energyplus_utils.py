@@ -205,7 +205,7 @@ class TestCalculateWindowGeometry:
         wall_area = 20.0  # 10m width * 2m height
         sill_height = 1.0
         
-        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height)
+        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height, 0.0)  # North-facing wall
         
         # Verify result structure
         assert len(new_vertices) == 4
@@ -227,7 +227,7 @@ class TestCalculateWindowGeometry:
         wall_area = 15.0
         sill_height = 1.0
         
-        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height)
+        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height, 90.0)  # East-facing wall
         
         # Verify result structure
         assert len(new_vertices) == 4
@@ -245,15 +245,15 @@ class TestCalculateWindowGeometry:
         
         # Small window area (< 1.5)
         wwr_small = 0.05  # 1.0 m² window
-        new_vertices_small = calculate_window_geometry(vertices, wwr_small, wall_area, sill_height)
+        new_vertices_small = calculate_window_geometry(vertices, wwr_small, wall_area, sill_height, 0.0)
         
         # Medium window area (1.5 - 3.5)
         wwr_medium = 0.15  # 3.0 m² window
-        new_vertices_medium = calculate_window_geometry(vertices, wwr_medium, wall_area, sill_height)
+        new_vertices_medium = calculate_window_geometry(vertices, wwr_medium, wall_area, sill_height, 0.0)
         
         # Large window area (> 3.5)
         wwr_large = 0.25  # 5.0 m² window
-        new_vertices_large = calculate_window_geometry(vertices, wwr_large, wall_area, sill_height)
+        new_vertices_large = calculate_window_geometry(vertices, wwr_large, wall_area, sill_height, 0.0)
         
         # Verify different aspect ratios produce different geometries
         assert new_vertices_small != new_vertices_medium
@@ -268,7 +268,7 @@ class TestCalculateWindowGeometry:
         sill_height = 1.0
         
         with pytest.raises(ValueError, match="Window is not axis-aligned!"):
-            calculate_window_geometry(vertices, wwr, wall_area, sill_height)
+            calculate_window_geometry(vertices, wwr, wall_area, sill_height, 0.0)
     
     def test_calculate_window_geometry_centering(self):
         """Test that windows are properly centered horizontally."""
@@ -277,7 +277,7 @@ class TestCalculateWindowGeometry:
         wall_area = 20.0  # 5m width * 4m height
         sill_height = 1.0
         
-        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height)
+        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height, 0.0)
         
         # Calculate center of new window
         y_coords = [v[1] for v in new_vertices]
@@ -294,7 +294,7 @@ class TestCalculateWindowGeometry:
         wall_area = 20.0
         sill_height = 2.0
         
-        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height)
+        new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height, 0.0)
         
         # Verify sill height is preserved
         min_z = min(v[2] for v in new_vertices)

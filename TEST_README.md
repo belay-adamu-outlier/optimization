@@ -48,16 +48,16 @@ python run_tests.py test test_apply_wall_construction
 
 ```bash
 # Run all tests
-pytest test_run_energyplus.py -v
+pytest test_energyplus_utils.py -v
 
 # Run tests with coverage
-pytest test_run_energyplus.py --cov=energyplus_utils --cov-report=html -v
+pytest test_energyplus_utils.py --cov=energyplus_utils --cov-report=html -v
 
 # Run specific test class
-pytest test_run_energyplus.py::TestApplyConstructionToSurfaces -v
+pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces -v
 
 # Run specific test
-pytest test_run_energyplus.py::TestApplyConstructionToSurfaces::test_apply_wall_construction -v
+pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wall_construction -v
 ```
 
 ## Test Scenarios
@@ -105,9 +105,9 @@ pytest test_run_energyplus.py::TestApplyConstructionToSurfaces::test_apply_wall_
 When running the tests, you should see output similar to:
 
 ```
-test_run_energyplus.py::TestApplyConstructionToSurfaces::test_apply_wall_construction PASSED
-test_run_energyplus.py::TestApplyConstructionToSurfaces::test_apply_roof_construction PASSED
-test_run_energyplus.py::TestApplyConstructionToSurfaces::test_apply_window_construction PASSED
+test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wall_construction PASSED
+test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_roof_construction PASSED
+test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_window_construction PASSED
 ...
 ```
 

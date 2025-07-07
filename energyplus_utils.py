@@ -74,63 +74,83 @@ def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
             infiltration.Air_Changes_per_Hour = infiltration_ach_ambient  # Set converted ACH
 
 
-def calculate_window_geometry(vertices, wwr, wall_area, sill_height):
+def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimuth):
     """
-    Given the original window vertices, WWR, wall area, and sill height,
+    Given the original window vertices, WWR, wall area, sill height, and wall azimuth,
     return new vertices for the window that use an appropriate aspect ratio for the area,
-    are horizontally centered, and maintain the sill height.
+    are horizontally centered, and maintain the sill height and wall orientation.
+    The returned vertices will be in the same winding order as the input vertices.
     """
-    # vertices: list of (x, y, z) tuples
     vertices = np.array(vertices)
-    # Find which coordinate is fixed (X or Y)
+    wall_azimuth = wall_azimuth % 360
+    # Axis-alignment check (restore original logic)
     x_vals = vertices[:, 0]
     y_vals = vertices[:, 1]
-    if np.allclose(x_vals, x_vals[0]):
-        fixed_axis = 'x'
-        fixed_val = x_vals[0]
-        var_vals = y_vals
-    elif np.allclose(y_vals, y_vals[0]):
-        fixed_axis = 'y'
-        fixed_val = y_vals[0]
-        var_vals = x_vals
-    else:
+    if (not np.allclose(x_vals, x_vals[0])) and (not np.allclose(y_vals, y_vals[0])):
         raise ValueError("Window is not axis-aligned!")
-    # Current width and center
+    
+    # Determine if wall is primarily North-South or East-West oriented
+    if (45 <= wall_azimuth < 135) or (225 <= wall_azimuth < 315):
+        fixed_axis = 'y'
+        var_vals = vertices[:, 0]
+    else:
+        fixed_axis = 'x'
+        var_vals = vertices[:, 1]
+    
+    # Calculate center of the variable coordinate (for centering the window)
     center = (np.max(var_vals) + np.min(var_vals)) / 2
-    # New area
+    
+    # Calculate new window area and dimensions
     window_area = wall_area * wwr
-    # Select aspect ratio based on area
     if window_area < 1.5:
         aspect_ratio = 1.0
     elif window_area < 3.5:
         aspect_ratio = 1.5
     else:
         aspect_ratio = 2.0
-    # Compute new height and width
+    
     new_height = np.sqrt(window_area / aspect_ratio)
     new_width = aspect_ratio * new_height
-    # New Z values
+    
+    # Keep original sill height
     new_z_min = sill_height
     new_z_max = sill_height + new_height
-    # New variable coordinate values
+    
+    # Calculate new variable coordinate range (centered)
     new_var_min = center - new_width / 2
     new_var_max = center + new_width / 2
-    # Build new vertices (order: bottom left, bottom right, top right, top left)
+    
+    # Build new vertices - use original fixed coordinate values directly
     if fixed_axis == 'x':
-        new_vertices = [
-            (fixed_val, new_var_min, new_z_min),
-            (fixed_val, new_var_max, new_z_min),
-            (fixed_val, new_var_max, new_z_max),
-            (fixed_val, new_var_min, new_z_max),
+        # X is fixed, vary Y
+        base_vertices = [
+            (x_vals[0], new_var_min, new_z_min),
+            (x_vals[0], new_var_max, new_z_min),
+            (x_vals[0], new_var_max, new_z_max),
+            (x_vals[0], new_var_min, new_z_max),
         ]
     else:
-        new_vertices = [
-            (new_var_min, fixed_val, new_z_min),
-            (new_var_max, fixed_val, new_z_min),
-            (new_var_max, fixed_val, new_z_max),
-            (new_var_min, fixed_val, new_z_max),
+        # Y is fixed, vary X
+        base_vertices = [
+            (new_var_min, y_vals[0], new_z_min),
+            (new_var_max, y_vals[0], new_z_min),
+            (new_var_max, y_vals[0], new_z_max),
+            (new_var_min, y_vals[0], new_z_max),
         ]
-    return new_vertices
+    # Map new vertices to the original winding order
+    # Find the order of the original vertices (clockwise or counterclockwise)
+    def polygon_area(verts):
+        # Shoelace formula for area (sign gives winding)
+        x = [v[0] for v in verts]
+        y = [v[1] for v in verts]
+        return 0.5 * sum(x[i] * y[(i+1)%4] - x[(i+1)%4] * y[i] for i in range(4))
+    orig_area = polygon_area(vertices)
+    base_area = polygon_area(base_vertices)
+    if np.sign(orig_area) != np.sign(base_area):
+        # Reverse the new vertices to match the original winding
+        base_vertices = base_vertices[::-1]
+    # Return new vertices in the same order as the input
+    return [base_vertices[i] for i in range(4)]
 
 
 def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
@@ -144,7 +164,29 @@ def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
                 break
         if parent_wall is None:
             continue
-        azimuth = float(parent_wall.Azimuth)
+        
+        # Calculate azimuth from wall vertices instead of accessing non-existent field
+        wall_vertices = []
+        for i in range(1, 5):
+            x = getattr(parent_wall, f'Vertex_{i}_Xcoordinate', None)
+            y = getattr(parent_wall, f'Vertex_{i}_Ycoordinate', None)
+            z = getattr(parent_wall, f'Vertex_{i}_Zcoordinate', None)
+            if x is not None and y is not None and z is not None:
+                wall_vertices.append((float(x), float(y), float(z)))
+        
+        if len(wall_vertices) < 4:
+            continue
+        
+        # Calculate azimuth from wall orientation
+        # Use the first two vertices to determine the wall direction
+        v0, v1 = wall_vertices[0], wall_vertices[1]
+        dx = v1[0] - v0[0]
+        dy = v1[1] - v0[1]
+        
+        # Calculate azimuth in degrees (0 = North, 90 = East, 180 = South, 270 = West)
+        # Use arctan2(dy, dx) for correct azimuth calculation
+        azimuth = np.degrees(np.arctan2(dy, dx)) % 360
+        
         if 45 <= azimuth < 135:
             wwr = wwr_east
         elif 135 <= azimuth < 225:
@@ -153,21 +195,13 @@ def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
             wwr = wwr_west
         else:
             wwr = wwr_north
-        # Get wall area from its vertices
-        wall_vertices = []
-        for i in range(1, 5):
-            x = getattr(parent_wall, f'Vertex_{i}_Xcoordinate', None)
-            y = getattr(parent_wall, f'Vertex_{i}_Ycoordinate', None)
-            z = getattr(parent_wall, f'Vertex_{i}_Zcoordinate', None)
-            if x is not None and y is not None and z is not None:
-                wall_vertices.append((float(x), float(y), float(z)))
-        if len(wall_vertices) < 4:
-            continue
+        
         # Calculate wall area (assume rectangle)
         v0, v1, v2, v3 = wall_vertices
         width = np.linalg.norm(np.array(v1)[:2] - np.array(v0)[:2])
         height = np.abs(v2[2] - v0[2])
         wall_area = width * height
+        
         # Get window vertices
         win_vertices = []
         for i in range(1, 5):
@@ -181,12 +215,65 @@ def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
         # Sill height
         sill_height = min([v[2] for v in win_vertices])
         # Calculate new vertices
-        new_vertices = calculate_window_geometry(win_vertices, wwr, wall_area, sill_height)
+        new_vertices = calculate_window_geometry(win_vertices, wwr, wall_area, sill_height, azimuth)
         # Update fenestration vertices
         for i, (x, y, z) in enumerate(new_vertices, 1):
             setattr(fenestration, f'Vertex_{i}_Xcoordinate', x)
             setattr(fenestration, f'Vertex_{i}_Ycoordinate', y)
             setattr(fenestration, f'Vertex_{i}_Zcoordinate', z)
+
+
+def modify_idf(idf, envelope_parameters, save=False, save_path=None):
+    """
+    Apply envelope parameters to an IDF object and optionally save the modified file.
+    
+    Args:
+        idf: IDF object to modify
+        envelope_parameters (dict): Dictionary containing envelope parameters:
+            - 'external_wall': External wall construction name
+            - 'roof': Roof construction name
+            - 'window': Window construction name
+            - 'infiltration_ach': Infiltration rate in ACH at 50 Pa
+            - 'wwr_east': Window-to-wall ratio for east facade
+            - 'wwr_west': Window-to-wall ratio for west facade
+            - 'wwr_north': Window-to-wall ratio for north facade
+            - 'wwr_south': Window-to-wall ratio for south facade
+        save (bool): Whether to save the modified IDF file
+        save_path (str, optional): Path to save the modified IDF file. If None, uses original path
+    
+    Returns:
+        IDF: The modified IDF object
+    """
+    # Apply envelope parameters
+    if 'external_wall' in envelope_parameters:
+        apply_construction_to_surfaces(idf, envelope_parameters['external_wall'], 'Wall')
+    
+    if 'roof' in envelope_parameters:
+        apply_construction_to_surfaces(idf, envelope_parameters['roof'], 'Roof')
+    
+    if 'window' in envelope_parameters:
+        apply_construction_to_surfaces(idf, envelope_parameters['window'], 'Window')
+    
+    # Apply infiltration
+    if 'infiltration_ach' in envelope_parameters:
+        apply_infiltration_to_zones(idf, envelope_parameters['infiltration_ach'])
+    
+    # Apply WWR
+    if all(key in envelope_parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
+        apply_wwr_to_windows(idf, 
+                           envelope_parameters['wwr_east'],
+                           envelope_parameters['wwr_west'],
+                           envelope_parameters['wwr_north'],
+                           envelope_parameters['wwr_south'])
+    
+    # Save the modified IDF file if requested
+    if save:
+        if save_path is None:
+            # Use the original path if no save_path provided
+            save_path = idf.idfname
+        idf.save(save_path)
+    
+    return idf
 
 
 def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, output_dir=None):
@@ -228,27 +315,8 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
         # Initialize IDF with both IDF file and weather file
         idf = IDF(idf_path, weather_path)
         
-        # Apply envelope parameters
-        if 'external_wall' in envelope_parameters:
-            apply_construction_to_surfaces(idf, envelope_parameters['external_wall'], 'Wall')
-        
-        if 'roof' in envelope_parameters:
-            apply_construction_to_surfaces(idf, envelope_parameters['roof'], 'Roof')
-        
-        if 'window' in envelope_parameters:
-            apply_construction_to_surfaces(idf, envelope_parameters['window'], 'Window')
-        
-        # Apply infiltration
-        if 'infiltration_ach' in envelope_parameters:
-            apply_infiltration_to_zones(idf, envelope_parameters['infiltration_ach'])
-        
-        # Apply WWR
-        if all(key in envelope_parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
-            apply_wwr_to_windows(idf, 
-                               envelope_parameters['wwr_east'],
-                               envelope_parameters['wwr_west'],
-                               envelope_parameters['wwr_north'],
-                               envelope_parameters['wwr_south'])
+        # Apply envelope parameters using the new modify_idf function
+        idf = modify_idf(idf, envelope_parameters)
         
         # Run simulation with specified output directory
         idf.run(output_directory=output_dir)
