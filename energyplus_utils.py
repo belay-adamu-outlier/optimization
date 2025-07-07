@@ -7,6 +7,7 @@ calculates average overheating, and organizes output files.
 
 import os
 import gc
+import shutil
 from datetime import datetime
 from eppy.modeleditor import IDF
 from simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
@@ -309,8 +310,15 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_dir = f"simulation_output_{timestamp}"
         
+        # Create multi_run directory if it doesn't exist
+        multi_run_dir = "multi_run"
+        os.makedirs(multi_run_dir, exist_ok=True)
+        
+        # Create the full output directory path within multi_run
+        full_output_dir = os.path.join(multi_run_dir, output_dir)
+        
         # Ensure output directory exists
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(full_output_dir, exist_ok=True)
         
         # Set the IDD file if provided
         if idd_path:
@@ -323,9 +331,9 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
         idf = modify_idf(idf, envelope_parameters)
         
         # Run simulation with specified output directory and verbosity
-        idf.run(output_directory=output_dir, verbose=verbose)
+        idf.run(output_directory=full_output_dir, verbose=verbose)
         
-        return output_dir
+        return full_output_dir
         
     finally:
         # Clear memory
@@ -334,12 +342,13 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
         gc.collect()
 
 
-def analyze_simulation_results(output_dir):
+def analyze_simulation_results(output_dir, cleanup=True):
     """
     Analyze simulation results from a completed EnergyPlus simulation.
     
     Args:
         output_dir (str): Path to the simulation output directory
+        cleanup (bool): Whether to delete the output directory after analysis (default: True)
     
     Returns:
         dict: Dictionary containing simulation results, district heating, and overheating analysis
@@ -362,7 +371,7 @@ def analyze_simulation_results(output_dir):
             overheating_results = analyze_overheating(zone_temperatures)
             
             # Print overheating analysis results
-            print_overheating_analysis_results(overheating_results)
+            # print_overheating_analysis_results(overheating_results)
             
             average_overheating = overheating_results['average_overheating_hours']
         else:
@@ -377,13 +386,53 @@ def analyze_simulation_results(output_dir):
             'overheating_results': overheating_results
         }
         
+        # Clean up output directory if requested
+        if cleanup and os.path.exists(output_dir):
+            try:
+                shutil.rmtree(output_dir)
+                results['output_directory'] = None  # Indicate directory was cleaned up
+                
+                # Check if multi_run directory is now empty and remove it if so
+                multi_run_dir = os.path.dirname(output_dir)
+                if os.path.basename(multi_run_dir) == "multi_run" and os.path.exists(multi_run_dir):
+                    try:
+                        # Only remove if directory is empty
+                        if not os.listdir(multi_run_dir):
+                            os.rmdir(multi_run_dir)
+                    except Exception as rmdir_error:
+                        # It's okay if we can't remove the multi_run directory
+                        pass
+                        
+            except Exception as cleanup_error:
+                # Log cleanup error but don't fail the analysis
+                print(f"Warning: Failed to clean up output directory {output_dir}: {cleanup_error}")
+        
         return results
         
     except Exception as e:
+        # Clean up output directory even if analysis failed
+        if cleanup and os.path.exists(output_dir):
+            try:
+                shutil.rmtree(output_dir)
+                
+                # Check if multi_run directory is now empty and remove it if so
+                multi_run_dir = os.path.dirname(output_dir)
+                if os.path.basename(multi_run_dir) == "multi_run" and os.path.exists(multi_run_dir):
+                    try:
+                        # Only remove if directory is empty
+                        if not os.listdir(multi_run_dir):
+                            os.rmdir(multi_run_dir)
+                    except Exception as rmdir_error:
+                        # It's okay if we can't remove the multi_run directory
+                        pass
+                        
+            except Exception as cleanup_error:
+                print(f"Warning: Failed to clean up output directory {output_dir}: {cleanup_error}")
+        
         return {
             'success': False,
             'error': str(e),
-            'output_directory': output_dir,
+            'output_directory': None,
             'district_heating_kwh': None,
             'average_overheating_hours': None,
             'overheating_results': None
