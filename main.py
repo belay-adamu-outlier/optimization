@@ -552,11 +552,8 @@ def main():
         runner = None
         print("Running in single-threaded mode")
     
-    # Define problem with parallel runner if available
-    if runner:
-        problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner)
-    else:
-        problem = BuildingEnvelopeProblem(optimization_variables)
+    # Define problem - always pass elementwise_runner (None is fine for single-threaded)
+    problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner)
     
     # Define callback
     callback = EvaluationCallback(optimization_variables)
