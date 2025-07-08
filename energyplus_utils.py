@@ -67,12 +67,14 @@ def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
             # Update existing infiltration - clear Design_Flow_Rate and set Air_Changes_per_Hour
             existing_infiltration.Design_Flow_Rate = ''
             existing_infiltration.Air_Changes_per_Hour = infiltration_ach_ambient
+            existing_infiltration.Design_Flow_Rate_Calculation_Method = 'AirChanges/Hour'
         else:
             # Create new infiltration object
             infiltration = idf.newidfobject('ZONEINFILTRATION:DESIGNFLOWRATE')
             infiltration.Zone_or_ZoneList_Name = zone_name
             infiltration.Design_Flow_Rate = ''  # Clear this field
             infiltration.Air_Changes_per_Hour = infiltration_ach_ambient  # Set converted ACH
+            infiltration.Design_Flow_Rate_Calculation_Method = 'AirChanges/Hour'
 
 
 def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimuth):
