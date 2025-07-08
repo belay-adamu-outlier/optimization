@@ -1,5 +1,5 @@
 {
-  "external_walls": [
+  "external_wall": [
     "R3 - Wall",
     "R9 - Wall",
     "R17 - Wall",
@@ -11,7 +11,7 @@
     "R54 - Wall",
     "R60 - Wall"
   ],
-  "roofs": [
+  "roof": [
     "R3 - Roof",
     "R10 - Roof",
     "R18 - Roof",
@@ -23,7 +23,7 @@
     "R63 - Roof",
     "R70 - Roof"
   ],
-  "windows": [
+  "window": [
     "Dbl LoE Elec Ref Colored 6mm/13m Arg - 1001",
     "Dbl LoE (e2=.1) Tint 6mm/13mm Air - 1002",
     "Dbl LoE Spec Sel Tint 6mm/13mm Arg - 1003",
@@ -33,7 +33,7 @@
     "Dbl LoE (e2=.1) Tint 6mm/13mm Arg - 1007",
     "SageGlass Climatop Blue No Tint - 1008"
   ],
-  "infiltration": [0.3, 0.54, 0.78, 1.02, 1.26, 1.50, 1.74, 1.98, 2.22, 2.5],
+  "infiltration_ach": [0.3, 0.54, 0.78, 1.02, 1.26, 1.50, 1.74, 1.98, 2.22, 2.5],
   "wwr_east": [20.0, 22.22, 24.44, 26.67, 28.89, 31.11, 33.33, 35.56, 37.78, 40.0],
   "wwr_west": [20.0, 22.22, 24.44, 26.67, 28.89, 31.11, 33.33, 35.56, 37.78, 40.0],
   "wwr_north": [20.0, 22.22, 24.44, 26.67, 28.89, 31.11, 33.33, 35.56, 37.78, 40.0],
