@@ -30034,7 +30034,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     NW3:BR_Roof_1_0_0,       !- Name
     Roof,                    !- Surface Type
-    R 70 - Roof,             !- Construction Name
+    R70 - Roof,              !- Construction Name
     NW3:BR,                  !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -30209,7 +30209,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     NW3:LR_Roof_1_0_0,       !- Name
     Roof,                    !- Surface Type
-    R 70 - Roof,             !- Construction Name
+    R70 - Roof,              !- Construction Name
     NW3:LR,                  !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -30234,7 +30234,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     NW3:LR_Roof_1_0_1,       !- Name
     Roof,                    !- Surface Type
-    R 70 - Roof,             !- Construction Name
+    R70 - Roof,              !- Construction Name
     NW3:LR,                  !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -30459,7 +30459,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     NE3:BR_Roof_1_0_0,       !- Name
     Roof,                    !- Surface Type
-    R 63 - Roof,             !- Construction Name
+    R63 - Roof,              !- Construction Name
     NE3:BR,                  !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -30634,7 +30634,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     NE3:LR_Roof_1_0_0,       !- Name
     Roof,                    !- Surface Type
-    R 63 - Roof,             !- Construction Name
+    R63 - Roof,              !- Construction Name
     NE3:LR,                  !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -30659,7 +30659,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     NE3:LR_Roof_1_0_1,       !- Name
     Roof,                    !- Surface Type
-    R 63 - Roof,             !- Construction Name
+    R63 - Roof,              !- Construction Name
     NE3:LR,                  !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -30934,7 +30934,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     N3:BR_Roof_1_0_0,        !- Name
     Roof,                    !- Surface Type
-    R 55 - Roof,             !- Construction Name
+    R55 - Roof,              !- Construction Name
     N3:BR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31084,7 +31084,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     N3:LR_Roof_1_0_0,        !- Name
     Roof,                    !- Surface Type
-    R 55 - Roof,             !- Construction Name
+    R55 - Roof,              !- Construction Name
     N3:LR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31109,7 +31109,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     N3:LR_Roof_1_0_1,        !- Name
     Roof,                    !- Surface Type
-    R 55 - Roof,             !- Construction Name
+    R55 - Roof,              !- Construction Name
     N3:LR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31134,7 +31134,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     N3:LR_Roof_1_0_2,        !- Name
     Roof,                    !- Surface Type
-    R 55 - Roof,             !- Construction Name
+    R55 - Roof,              !- Construction Name
     N3:LR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31334,7 +31334,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     E3:BR_Roof_1_0_0,        !- Name
     Roof,                    !- Surface Type
-    R 48 - Roof,             !- Construction Name
+    R48 - Roof,              !- Construction Name
     E3:BR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31484,7 +31484,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     E3:LR_Roof_1_0_0,        !- Name
     Roof,                    !- Surface Type
-    R 48 - Roof,             !- Construction Name
+    R48 - Roof,              !- Construction Name
     E3:LR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31509,7 +31509,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     E3:LR_Roof_1_0_1,        !- Name
     Roof,                    !- Surface Type
-    R 48 - Roof,             !- Construction Name
+    R48 - Roof,              !- Construction Name
     E3:LR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -31534,7 +31534,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     E3:LR_Roof_1_0_2,        !- Name
     Roof,                    !- Surface Type
-    R 48 - Roof,             !- Construction Name
+    R48 - Roof,              !- Construction Name
     E3:LR,                   !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -32984,7 +32984,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_0,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33009,7 +33009,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_1,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33034,7 +33034,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_2,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33059,7 +33059,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_3,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33084,7 +33084,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_4,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33109,7 +33109,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_5,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33134,7 +33134,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_6,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object
@@ -33159,7 +33159,7 @@ BuildingSurface:Detailed,
 BuildingSurface:Detailed,
     CORRIDOR3:ZONE1_Roof_1_0_7,  !- Name
     Roof,                    !- Surface Type
-    R 40 - Roof,             !- Construction Name
+    R40 - Roof,              !- Construction Name
     CORRIDOR3:ZONE1,         !- Zone Name
     Outdoors,                !- Outside Boundary Condition
     ,                        !- Outside Boundary Condition Object

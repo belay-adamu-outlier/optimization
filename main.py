@@ -562,8 +562,8 @@ def main():
     method = NSGA2(
         pop_size=4,
         sampling=IntegerRandomSampling(),
-        crossover=SBX(prob=0.9, eta=15, vtype=float, repair=RoundingRepair()),
-        mutation=PM(prob=0.1, eta=20, vtype=float, repair=RoundingRepair()),
+        crossover=SBX(prob=1, eta=5, vtype=float, repair=RoundingRepair()),
+        mutation=PM(prob=0.125, eta=5, vtype=float, repair=RoundingRepair()),
         eliminate_duplicates=True
     )
     
