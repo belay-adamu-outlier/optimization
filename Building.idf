@@ -12672,7 +12672,7 @@ Construction,
 
 ! R 70 - Roof
 Construction,
-    R 70 - Roof,             !- Name
+    R70 - Roof,              !- Name
     Bitumen felt/sheet_.19,  !- Outside Layer
     EPS Expanded Polystyrene (Standard)_.3816,  !- Layer 2
     0.5 in. Plywood (douglas fir)_.0127,  !- Layer 3
@@ -12682,7 +12682,7 @@ Construction,
 
 ! <Previous reversed>
 Construction,
-    R 70 - Roof_Rev,         !- Name
+    R70 - Roof_Rev,          !- Name
     Gypsum Plastering_.0127, !- Outside Layer
     Foam - polyisocyanate_.0447,  !- Layer 2
     34_RVAL_3,               !- Layer 3
@@ -12692,7 +12692,7 @@ Construction,
 
 ! R 63 - Roof
 Construction,
-    R 63 - Roof,             !- Name
+    R63 - Roof,              !- Name
     Bitumen felt/sheet_.19,  !- Outside Layer
     EPS Expanded Polystyrene (Standard)_.3323,  !- Layer 2
     0.5 in. Plywood (douglas fir)_.0127,  !- Layer 3
@@ -12702,7 +12702,7 @@ Construction,
 
 ! <Previous reversed>
 Construction,
-    R 63 - Roof_Rev,         !- Name
+    R63 - Roof_Rev,          !- Name
     Gypsum Plastering_.0127, !- Outside Layer
     Foam - polyisocyanate_.0447,  !- Layer 2
     36_RVAL_3,               !- Layer 3
@@ -12732,7 +12732,7 @@ Construction,
 
 ! R 55 - Roof
 Construction,
-    R 55 - Roof,             !- Name
+    R55 - Roof,              !- Name
     Bitumen felt/sheet_.19,  !- Outside Layer
     EPS Expanded Polystyrene (Standard)_.2759,  !- Layer 2
     0.5 in. Plywood (douglas fir)_.0127,  !- Layer 3
@@ -12742,7 +12742,7 @@ Construction,
 
 ! <Previous reversed>
 Construction,
-    R 55 - Roof_Rev,         !- Name
+    R55 - Roof_Rev,          !- Name
     Gypsum Plastering_.0127, !- Outside Layer
     Foam - polyisocyanate_.0447,  !- Layer 2
     40_RVAL_3,               !- Layer 3
@@ -12752,7 +12752,7 @@ Construction,
 
 ! R 48 - Roof
 Construction,
-    R 48 - Roof,             !- Name
+    R48 - Roof,              !- Name
     Bitumen felt/sheet_.19,  !- Outside Layer
     EPS Expanded Polystyrene (Standard)_.2266,  !- Layer 2
     0.5 in. Plywood (douglas fir)_.0127,  !- Layer 3
@@ -12762,7 +12762,7 @@ Construction,
 
 ! <Previous reversed>
 Construction,
-    R 48 - Roof_Rev,         !- Name
+    R48 - Roof_Rev,          !- Name
     Gypsum Plastering_.0127, !- Outside Layer
     Foam - polyisocyanate_.0447,  !- Layer 2
     42_RVAL_3,               !- Layer 3
@@ -12790,7 +12790,7 @@ Construction,
 
 ! R 40 - Roof
 Construction,
-    R 40 - Roof,             !- Name
+    R40 - Roof,              !- Name
     Bitumen felt/sheet_.19,  !- Outside Layer
     EPS Expanded Polystyrene (Standard)_.1702,  !- Layer 2
     0.5 in. Plywood (douglas fir)_.0127,  !- Layer 3
@@ -12800,7 +12800,7 @@ Construction,
 
 ! <Previous reversed>
 Construction,
-    R 40 - Roof_Rev,         !- Name
+    R40 - Roof_Rev,          !- Name
     Gypsum Plastering_.0127, !- Outside Layer
     Foam - polyisocyanate_.0447,  !- Layer 2
     46_RVAL_3,               !- Layer 3
