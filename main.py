@@ -68,35 +68,31 @@ class EvaluationCallback(Callback):
                     existing_result = result
                     break
             
-            if existing_result is None:
-                # This is a new combination - add it
-                new_evaluations += 1
-                result_dict = {
-                    'generation': self.generation,
-                    'iteration': i,
-                    'mechanical_energy_use_intensity': F[i, 0],
-                    'average_overheating_hours': F[i, 1],
-                    'pareto_optimal': False  # Will be updated for display purposes
-                }
-                
-                # Add all parameters to result
-                for var_name, value in params.items():
-                    result_dict[var_name] = value
-                
-                self.all_results.append(result_dict)
-                self.generation_results.append(result_dict)
-                
-                # Store objective values for Pareto comparison
-                self.all_objectives.append([F[i, 0], F[i, 1]])
-            else:
-                # This is a duplicate - just update the generation info
-                existing_result['generation'] = self.generation
-                existing_result['iteration'] = i
-                existing_result['mechanical_energy_use_intensity'] = F[i, 0]
-                existing_result['average_overheating_hours'] = F[i, 1]
-                
-                # Add to generation results for CSV
-                self.generation_results.append(existing_result)
+            if existing_result:
+                # This is a duplicate - SKIP IT ENTIRELY
+                # Don't add to generation_results, don't update anything
+                # Just move on to the next individual
+                continue
+
+            # This is a new combination - add it
+            new_evaluations += 1
+            result_dict = {
+                'generation': self.generation,
+                'iteration': i,
+                'mechanical_energy_use_intensity': F[i, 0],
+                'average_overheating_hours': F[i, 1],
+                'pareto_optimal': False  # Will be updated for display purposes
+            }
+            
+            # Add all parameters to result
+            for var_name, value in params.items():
+                result_dict[var_name] = value
+            
+            self.all_results.append(result_dict)
+            self.generation_results.append(result_dict)
+            
+            # Store objective values for Pareto comparison
+            self.all_objectives.append([F[i, 0], F[i, 1]])
         
         # Calculate current Pareto optimality for display purposes (not for CSV)
         self._update_pareto_optimality_for_display()
@@ -104,9 +100,9 @@ class EvaluationCallback(Callback):
         # Clear screen and print comprehensive table
         self._print_table()
         
-        # Save current generation results to CSV (all members of this generation)
+        # Save current generation results to CSV (only new unique solutions)
         self._save_to_csv()
-        
+                
         # Print efficiency info
         print(f"\nGeneration {self.generation}: {new_evaluations} new unique evaluations out of {len(X)} total individuals")
         print(f"Total solutions so far: {len(self.all_results)}")
@@ -171,7 +167,7 @@ class EvaluationCallback(Callback):
         header_parts.extend([
             f"{'Mech_EUI':<8}",
             f"{'Overheating':<8}",
-            f"{'Pareto':<6}"  # Increased width to match data
+            f"{'Pareto':<6}"
         ])
         
         header = " ".join(header_parts)
@@ -217,17 +213,20 @@ class EvaluationCallback(Callback):
             for var_name in self.variable_names:
                 if var_name in result:
                     value = str(result[var_name])
-                    # Truncate long values
+                    # Truncate long values and ensure proper padding
                     if var_name in col_widths:
                         max_width = col_widths[var_name]
                         if len(value) > max_width:
                             value = value[:max_width-3] + "..."
+                        # Ensure the value is padded to exactly max_width characters
                         line_parts.append(f"{value:<{max_width}}")
                     else:
                         if len(value) > 8:
                             value = value[:5] + "..."
+                        # Ensure the value is padded to exactly 8 characters
                         line_parts.append(f"{value:<8}")
                 else:
+                    # Empty value - pad to the appropriate width
                     if var_name in col_widths:
                         line_parts.append(f"{'':<{col_widths[var_name]}}")
                     else:
@@ -236,7 +235,7 @@ class EvaluationCallback(Callback):
             line_parts.extend([
                 f"{result['mechanical_energy_use_intensity']:<8.3f}",
                 f"{result['average_overheating_hours']:<8.1f}",
-                f"{pareto_mark:<6}"  # Increased width to match header
+                f"{pareto_mark:<6}"
             ])
             
             line = " ".join(line_parts)
@@ -456,6 +455,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         xu = np.zeros(n_var, dtype=int)
         for i, (var_name, var_options) in enumerate(optimization_variables.items()):
             xu[i] = len(var_options) - 1
+            
         super().__init__(
             n_var=n_var,
             n_obj=2,
@@ -466,10 +466,23 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             elementwise_runner=elementwise_runner
         )
         self.optimization_variables = optimization_variables
+        # Track evaluated solutions to avoid re-simulation
+        self.evaluated_solutions = {}
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
             params = self._x_to_params(x)
+            
+            # Create unique key for this combination
+            combination_key = tuple(params.values())
+            
+            # Check if this combination has already been evaluated
+            if combination_key in self.evaluated_solutions:
+                # Reuse previous results
+                out["F"] = self.evaluated_solutions[combination_key]
+                return
+            
+            # This is a new combination - run simulation
             import os
             from datetime import datetime
             process_id = os.getpid()
@@ -482,15 +495,21 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 output_dir=f"simulation_output_{timestamp}_pid{process_id}",
                 verbose='q'
             )
-            results = analyze_simulation_results(output_dir)
+            results = analyze_simulation_results(output_dir, cleanup=False)
+            print(results)
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
                 mechanical_energy_use_intensity = district_heating / 2590.29
-                out["F"] = [mechanical_energy_use_intensity, average_overheating]
+                objective_values = [mechanical_energy_use_intensity, average_overheating]
             else:
-                out["F"] = [1000.0, 1000.0]
+                objective_values = [1000.0, 1000.0]
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
+            
+            # Store results for future reuse
+            self.evaluated_solutions[combination_key] = objective_values
+            out["F"] = objective_values
+            
         except Exception as e:
             out["F"] = [1000.0, 1000.0]
             print(f"Error evaluating individual: {str(e)}")
@@ -571,7 +590,7 @@ def main():
     res = minimize(
         problem,
         method,
-        termination=('n_gen', 5),
+        termination=('n_gen', 2),
         save_history=True,
         callback=callback
     )
