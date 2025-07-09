@@ -495,8 +495,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 output_dir=f"simulation_output_{timestamp}_pid{process_id}",
                 verbose='q'
             )
-            results = analyze_simulation_results(output_dir, cleanup=False)
-            print(results)
+            results = analyze_simulation_results(output_dir)
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
@@ -579,7 +578,7 @@ def main():
     
     # Define algorithm with built-in duplicate elimination
     method = NSGA2(
-        pop_size=4,
+        pop_size=40,
         sampling=IntegerRandomSampling(),
         crossover=SBX(prob=1, eta=5, vtype=float, repair=RoundingRepair()),
         mutation=PM(prob=0.125, eta=5, vtype=float, repair=RoundingRepair()),
@@ -590,7 +589,7 @@ def main():
     res = minimize(
         problem,
         method,
-        termination=('n_gen', 2),
+        termination=('n_gen', 100),
         save_history=True,
         callback=callback
     )
