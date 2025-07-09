@@ -8,7 +8,7 @@ DATA_PATTERN = re.compile(r'^\d+,[-+]?\d*\.?\d+')
 
 # Constants for ASHRAE 55 Adaptive method
 ASHRAE_ALPHA = 0.31
-ASHRAE_BETA = 17.8
+ASHRAE_BETA = 21.3
 
 
 def calculate_ashrae_adaptive_threshold(outdoor_temps: pd.Series, timestamps: pd.Series) -> pd.Series:
@@ -28,26 +28,36 @@ def calculate_ashrae_adaptive_threshold(outdoor_temps: pd.Series, timestamps: pd
         'temperature': outdoor_temps
     })
     
+    # Convert timestamps to datetime and extract date
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['date'] = df['timestamp'].dt.date
+    
     # Calculate daily mean temperatures
-    df['date'] = pd.to_datetime(df['timestamp']).dt.date
     daily_means = df.groupby('date')['temperature'].mean()
     
     # Calculate 7-day running mean
     # For the first 7 days, use available data (minimum 3 days required by ASHRAE 55)
     running_mean = daily_means.rolling(window=7, min_periods=3, center=False).mean()
-    
-    # Forward fill any NaN values (for days with insufficient data)
+
+    # Handle NaN values for the first few days
+    # ASHRAE 55 allows using available data for the first 7 days (minimum 3 days)
+    # Forward fill any remaining NaN values
     running_mean = running_mean.ffill()
+
+    # If there are still NaN values at the beginning, backfill them
+    running_mean = running_mean.bfill()
     
-    # Map daily running means back to hourly data
-    df['date'] = pd.to_datetime(df['timestamp']).dt.date
-    # Convert running_mean to a dictionary for mapping
-    running_mean_dict = running_mean.to_dict()
-    df['running_mean'] = df['date'].map(running_mean_dict)
+    # Map daily running means back to hourly data using merge
+    # Convert running_mean to DataFrame for merging
+    running_mean_df = running_mean.reset_index()
+    running_mean_df.columns = ['date', 'running_mean']
+    
+    # Merge with original data
+    df = df.merge(running_mean_df, on='date', how='left')
     
     # ASHRAE 55 Adaptive 80% criteria
     # T_adaptive = 0.31 * T_running_mean + 17.8
-    threshold_temps = 0.31 * df['running_mean'] + 17.8
+    threshold_temps = ASHRAE_ALPHA * df['running_mean'] + ASHRAE_BETA
     
     return threshold_temps
 
@@ -66,8 +76,8 @@ def calculate_overheating_hours(zone_temps: pd.DataFrame, threshold_temps: pd.Se
     # Ensure we have the same number of data points
     min_length = min(len(zone_temps), len(threshold_temps))
     
-    zone_temp_series = zone_temps['temperature'].iloc[:min_length]
-    threshold_series = threshold_temps.iloc[:min_length]
+    zone_temp_series = zone_temps['temperature'].iloc[:min_length].reset_index(drop=True)
+    threshold_series = threshold_temps.iloc[:min_length].reset_index(drop=True)
     
     # Count hours where zone temperature exceeds threshold
     overheating_hours = (zone_temp_series > threshold_series).sum()
