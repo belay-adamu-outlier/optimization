@@ -160,9 +160,17 @@ class EvaluationCallback(Callback):
         
         for var_name in self.variable_names:
             if var_name in col_widths:
-                header_parts.append(f"{var_name:<{col_widths[var_name]}}")
+                name = var_name
+                max_width = col_widths[var_name]
+                if len(name) > max_width:
+                    name = name[:max_width-3] + "..."
+                header_parts.append(f"{name:<{max_width}}")
             else:
-                header_parts.append(f"{var_name:<8}")
+                name = var_name
+                max_width = 8
+                if len(name) > max_width:
+                    name = name[:5] + "..."
+                header_parts.append(f"{name:<{max_width}}")
         
         header_parts.extend([
             f"{'Mech_EUI':<8}",
