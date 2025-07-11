@@ -143,14 +143,14 @@ class EvaluationCallback(Callback):
         
         # More compact column widths for better terminal display
         col_widths = {
-            'external_walls': 10,
-            'roofs': 10,
-            'windows': 20,
-            'infiltration': 6,
-            'wwr_east': 6,
-            'wwr_west': 6,
-            'wwr_north': 6,
-            'wwr_south': 6
+            'external_wall': 15,
+            'roof': 10,
+            'window': 47,
+            'infiltration_ach': 10,
+            'wwr_east': 9,
+            'wwr_west': 9,
+            'wwr_north': 9,
+            'wwr_south': 9
         }
         
         # Create header with fixed widths - match the data formatting exactly
