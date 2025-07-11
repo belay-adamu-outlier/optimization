@@ -14,9 +14,13 @@ from pymoo.core.callback import Callback
 import os
 import matplotlib.pyplot as plt
 from energyplus_utils import run_simulation, analyze_simulation_results
-
-
-
+from simulation_utils import (
+    initialize_cache, 
+    check_and_update_cache, 
+    save_global_cache, 
+    merge_all_cache_files,
+    GLOBAL_CACHE
+)
 
 
 class EvaluationCallback(Callback):
@@ -116,10 +120,7 @@ class EvaluationCallback(Callback):
         var_idx = 0
         
         for var_name, var_options in self.optimization_variables.items():
-            if var_name == 'infiltration':
-                # Infiltration is a continuous value, not an index
-                params[var_name] = var_options[int(x[var_idx])]
-            elif var_name.startswith('wwr_'):
+            if var_name.startswith('wwr_'):
                 # WWR values are percentages, convert to decimal
                 params[var_name] = var_options[int(x[var_idx])] / 100.0
             else:
@@ -474,25 +475,24 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             elementwise_runner=elementwise_runner
         )
         self.optimization_variables = optimization_variables
-        # Track evaluated solutions to avoid re-simulation
-        self.evaluated_solutions = {}
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
+            import os
+            from datetime import datetime
+            
             params = self._x_to_params(x)
             
             # Create unique key for this combination
             combination_key = tuple(params.values())
             
-            # Check if this combination has already been evaluated
-            if combination_key in self.evaluated_solutions:
-                # Reuse previous results
-                out["F"] = self.evaluated_solutions[combination_key]
+            # Check if this combination has already been evaluated using cache
+            cached_result = check_and_update_cache(combination_key)
+            if cached_result is not None:
+                out["F"] = cached_result
                 return
             
             # This is a new combination - run simulation
-            import os
-            from datetime import datetime
             process_id = os.getpid()
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
             output_dir = run_simulation(
@@ -513,8 +513,14 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 objective_values = [1000.0, 1000.0]
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
             
-            # Store results for future reuse
-            self.evaluated_solutions[combination_key] = objective_values
+            # Store results in global cache
+            GLOBAL_CACHE[combination_key] = objective_values
+            
+            # Save cache periodically to avoid too much file I/O
+            # Every 2 evaluations should be a good balance for multiprocessing
+            if len(GLOBAL_CACHE) % 2 == 0:
+                save_global_cache()
+            
             out["F"] = objective_values
             
         except Exception as e:
@@ -525,14 +531,15 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         params = {}
         var_idx = 0
         for var_name, var_options in self.optimization_variables.items():
-            if var_name == 'infiltration':
-                params[var_name] = var_options[int(x[var_idx])]
-            elif var_name.startswith('wwr_'):
+            if var_name.startswith('wwr_'):
                 params[var_name] = var_options[int(x[var_idx])] / 100.0
             else:
                 params[var_name] = var_options[int(x[var_idx])]
             var_idx += 1
         return params
+
+
+# Cache functions are now imported from simulation_utils
 
 
 def load_optimization_variables():
@@ -554,7 +561,13 @@ def load_config():
         return json.load(f)
 
 
-def main():
+def main(debug_mode=False):
+    # Initialize cache directory for this run
+    initialize_cache()
+    
+    if debug_mode:
+        print(f"DEBUG MODE: Cache directory will be preserved for inspection")
+    
     # Load optimization variables
     optimization_variables = load_optimization_variables()
     
@@ -586,7 +599,7 @@ def main():
     
     # Define algorithm with built-in duplicate elimination
     method = NSGA2(
-        pop_size=40,
+        pop_size=50,
         sampling=IntegerRandomSampling(),
         crossover=SBX(prob=1, eta=5, vtype=float, repair=RoundingRepair()),
         mutation=PM(prob=0.125, eta=5, vtype=float, repair=RoundingRepair()),
@@ -608,6 +621,9 @@ def main():
         pool.join()
         print("Closed multiprocessing pool")
     
+    # Merge all cache files and save as final cache
+    merge_all_cache_files(keep_cache_dir=debug_mode)
+    
     # Save final results with updated Pareto optimality
     callback.save_final_results()
     
@@ -625,4 +641,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    # Set debug_mode=True to keep cache directory for debugging
+    main(debug_mode=False) 

@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import numpy as np
 import re
+import json
+import shutil
 
 def parse_eso_variables(
     eso_file_path: str,
@@ -304,4 +306,145 @@ def extract_district_heating_from_htm(htm_file_path: str) -> float:
         raise ValueError("District Heating value not found in the End Uses table")
     
     return district_heating_value
+
+
+# ============================================================================
+# CACHING FUNCTIONS
+# ============================================================================
+
+# Global cache for multiprocessing
+CACHE_DIR = "cache"
+GLOBAL_CACHE = {}
+
+def initialize_cache():
+    """Initialize the cache directory for the current run."""
+    try:
+        # Create cache directory if it doesn't exist
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        print(f"Initialized cache directory: {CACHE_DIR}")
+    except Exception as e:
+        print(f"Warning: Could not initialize cache directory: {e}")
+
+def check_and_update_cache(combination_key):
+    """Check if combination exists in cache and update local cache from files."""
+    global GLOBAL_CACHE
+    
+    # Check local cache first
+    if combination_key in GLOBAL_CACHE:
+        return GLOBAL_CACHE[combination_key]
+    
+    # Check all cache files in the cache directory
+    try:
+        if os.path.exists(CACHE_DIR):
+            for filename in os.listdir(CACHE_DIR):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(CACHE_DIR, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            cache_data = json.load(f)
+                            temp_cache = {eval(k): v for k, v in cache_data.items()}
+                            if combination_key in temp_cache:
+                                print(f"DUPLICATE DETECTED in {filename}! Reusing results for: {combination_key}")
+                                result = temp_cache[combination_key]
+                                # Update local cache
+                                GLOBAL_CACHE[combination_key] = result
+                                return result
+                    except Exception as e:
+                        # Silently continue if individual file read fails
+                        pass
+    except Exception as e:
+        # Silently continue if cache directory access fails
+        pass
+    
+    # Also reload cache from all files to catch new entries
+    try:
+        if os.path.exists(CACHE_DIR):
+            for filename in os.listdir(CACHE_DIR):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(CACHE_DIR, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            cache_data = json.load(f)
+                            # Update local cache with any new entries from file
+                            for k, v in cache_data.items():
+                                key_tuple = eval(k)
+                                if key_tuple not in GLOBAL_CACHE:
+                                    GLOBAL_CACHE[key_tuple] = v
+                    except Exception as e:
+                        # Silently continue if individual file read fails
+                        pass
+            # Check again after reloading
+            if combination_key in GLOBAL_CACHE:
+                print(f"DUPLICATE DETECTED after reload! Reusing results for: {combination_key}")
+                return GLOBAL_CACHE[combination_key]
+    except Exception as e:
+        # Silently continue if cache directory access fails
+        pass
+    
+    return None  # Not found in cache
+
+def save_global_cache():
+    """Save the current process cache to its own file in the cache directory."""
+    try:
+        # Create cache directory if it doesn't exist
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        
+        # Create a unique filename for this process
+        process_id = os.getpid()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+        cache_filename = f"cache_pid{process_id}_{timestamp}.json"
+        cache_filepath = os.path.join(CACHE_DIR, cache_filename)
+        
+        # Convert tuple keys to strings for JSON serialization
+        cache_data = {str(k): v for k, v in GLOBAL_CACHE.items()}
+        
+        # Save to this process's cache file
+        with open(cache_filepath, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+        
+        print(f"Saved {len(GLOBAL_CACHE)} solutions to cache file {cache_filename}")
+    except Exception as e:
+        print(f"Warning: Could not save cache: {e}")
+
+def merge_all_cache_files(keep_cache_dir=False):
+    """Merge all cache files and save as final cache with timestamp."""
+    try:
+        # Create timestamp for final cache file
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        final_cache_file = f"final_cache_{timestamp}.json"
+        
+        # Load all cache files
+        merged_cache = {}
+        if os.path.exists(CACHE_DIR):
+            for filename in os.listdir(CACHE_DIR):
+                if filename.endswith('.json'):
+                    filepath = os.path.join(CACHE_DIR, filename)
+                    try:
+                        with open(filepath, 'r') as f:
+                            cache_data = json.load(f)
+                            # Convert string keys back to tuples and merge
+                            for k, v in cache_data.items():
+                                merged_cache[eval(k)] = v
+                    except Exception as e:
+                        print(f"Warning: Could not load cache file {filename}: {e}")
+        
+        # Save merged cache to final file
+        final_cache_data = {str(k): v for k, v in merged_cache.items()}
+        with open(final_cache_file, 'w') as f:
+            json.dump(final_cache_data, f, indent=2)
+        
+        print(f"Saved final cache with {len(merged_cache)} solutions to {final_cache_file}")
+        
+        # Clean up cache directory (optional)
+        if not keep_cache_dir:
+            try:
+                shutil.rmtree(CACHE_DIR)
+                print(f"Cleaned up cache directory {CACHE_DIR}")
+            except Exception as e:
+                print(f"Warning: Could not clean up cache directory: {e}")
+        else:
+            print(f"Keeping cache directory {CACHE_DIR} for debugging")
+            
+    except Exception as e:
+        print(f"Warning: Could not merge cache files: {e}")
 
