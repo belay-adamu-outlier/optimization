@@ -1,6 +1,7 @@
 import numpy as np
 import json
 import multiprocessing
+import threading
 import csv
 from datetime import datetime
 from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -585,14 +586,27 @@ def main():
         eliminate_duplicates=True
     )
     
-    # Run optimization
-    res = minimize(
-        problem,
-        method,
-        termination=('n_gen', 100),
-        save_history=True,
-        callback=callback
-    )
+    # Run optimization in a separate thread so the GUI remains responsive
+    def run_optimization(res_dict):
+        res = minimize(
+            problem,
+            method,
+            termination=('n_gen', 100),
+            save_history=True,
+            callback=callback
+        )
+        res_dict['res'] = res
+
+    result_holder = {}
+    opt_thread = threading.Thread(target=run_optimization, args=(result_holder,))
+    opt_thread.start()
+
+    # Keep processing GUI events while the optimization runs
+    while opt_thread.is_alive():
+        plt.pause(0.1)
+
+    opt_thread.join()
+    res = result_holder.get('res')
     
     # Clean up pool if used
     if pool:
@@ -617,4 +631,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()
