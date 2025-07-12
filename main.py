@@ -265,7 +265,7 @@ class EvaluationCallback(Callback):
             line_parts.extend([
                 f"{result['mechanical_energy_use_intensity']:<8.3f}",
                 f"{result['average_overheating_hours']:<8.1f}",
-                f"{pareto_mark:<6}"
+                f"{pareto_mark:<10}"
             ])
             
             line = " ".join(line_parts)
