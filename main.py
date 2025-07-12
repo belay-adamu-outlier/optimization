@@ -2,6 +2,7 @@ import numpy as np
 import json
 import multiprocessing
 import csv
+import argparse
 from datetime import datetime
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.problem import ElementwiseProblem, StarmapParallelization
@@ -24,11 +25,12 @@ from simulation_utils import (
 
 
 class EvaluationCallback(Callback):
-    def __init__(self, optimization_variables, shared_cache=None, debug_mode=False):
+    def __init__(self, optimization_variables, shared_cache=None, debug_mode=False, metadata=None):
         super().__init__()
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
         self.debug_mode = debug_mode
+        self.metadata = metadata or {}
         self.generation = 0
         self.all_results = []
         self.all_objectives = []  # Store all objective values for Pareto comparison
@@ -309,8 +311,14 @@ class EvaluationCallback(Callback):
             result['pareto_optimal'] = pareto_optimal[i]
     
     def _initialize_csv(self):
-        """Initialize the CSV file with headers."""
+        """Initialize the CSV file with headers and metadata."""
         with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            # Write metadata section
+            csvfile.write("# Optimization Metadata\n")
+            for key, value in self.metadata.items():
+                csvfile.write(f"# {key}: {value}\n")
+            csvfile.write("#\n")
+            
             fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -345,6 +353,12 @@ class EvaluationCallback(Callback):
         
         # Write all results to CSV with proper Pareto optimality
         with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            # Write metadata section
+            csvfile.write("# Optimization Metadata\n")
+            for key, value in self.metadata.items():
+                csvfile.write(f"# {key}: {value}\n")
+            csvfile.write("#\n")
+            
             fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -464,7 +478,7 @@ class EvaluationCallback(Callback):
 
 
 class BuildingEnvelopeProblem(ElementwiseProblem):
-    def __init__(self, optimization_variables, elementwise_runner=None, shared_cache=None):
+    def __init__(self, optimization_variables, elementwise_runner=None, shared_cache=None, weather_file=None):
         n_var = len(optimization_variables)
         xl = np.zeros(n_var, dtype=int)
         xu = np.zeros(n_var, dtype=int)
@@ -482,6 +496,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         )
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
+        self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
@@ -529,7 +544,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
             output_dir = run_simulation(
                 idf_path="Building.idf",
-                weather_path="Vancouver - 2021 AMY.epw",
+                weather_path=self.weather_file,
                 envelope_parameters=params,
                 idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
                 output_dir=f"simulation_output_{timestamp}_pid{process_id}",
@@ -588,7 +603,130 @@ def load_config():
         return json.load(f)
 
 
-def main(debug_mode=False):
+def get_interactive_arguments():
+    """Get all arguments interactively with clear default value prompts."""
+    print("=" * 60)
+    print("BUILDING ENVELOPE OPTIMIZATION - INTERACTIVE SETUP")
+    print("=" * 60)
+    print("Please provide the following parameters. Press Enter to use default values.\n")
+    
+    # Weather file selection
+    print("Weather file options:")
+    print("1. Vancouver - 2021 AMY.epw (default)")
+    print("2. CAN_BC_Vancouver.718920_CWEC.epw")
+    print("3. Enter custom path")
+    choice = input("Enter choice (1-3) or press Enter for default value of 1: ").strip()
+    
+    if choice == "1" or choice == "":
+        weather_file = "Vancouver - 2021 AMY.epw"
+    elif choice == "2":
+        weather_file = "CAN_BC_Vancouver.718920_CWEC.epw"
+    elif choice == "3":
+        weather_file = input("Enter weather file path: ").strip()
+    else:
+        print("Invalid choice, using default: Vancouver - 2021 AMY.epw")
+        weather_file = "Vancouver - 2021 AMY.epw"
+    
+    print(f"Selected weather file: {weather_file}\n")
+    
+    # Number of generations
+    generations_input = input("Enter number of generations (press Enter for default value of 100): ").strip()
+    if generations_input:
+        try:
+            generations = int(generations_input)
+        except ValueError:
+            print("Invalid input, using default: 100")
+            generations = 100
+    else:
+        generations = 100
+    
+    print(f"Number of generations: {generations}\n")
+    
+    # Population size
+    population_input = input("Enter population size (press Enter for default value of 50): ").strip()
+    if population_input:
+        try:
+            population_size = int(population_input)
+        except ValueError:
+            print("Invalid input, using default: 50")
+            population_size = 50
+        else:
+            population_size = 50
+    else:
+        population_size = 50
+    
+    print(f"Population size: {population_size}\n")
+    
+    # Crossover probability
+    crossover_input = input("Enter crossover probability (press Enter for default value of 0.5): ").strip()
+    if crossover_input:
+        try:
+            crossover_prob = float(crossover_input)
+        except ValueError:
+            print("Invalid input, using default: 0.5")
+            crossover_prob = 0.5
+        else:
+            crossover_prob = 0.5
+    else:
+        crossover_prob = 0.5
+    
+    print(f"Crossover probability: {crossover_prob}\n")
+    
+    # Mutation probability
+    mutation_input = input("Enter mutation probability (press Enter for default value of 0.125): ").strip()
+    if mutation_input:
+        try:
+            mutation_prob = float(mutation_input)
+        except ValueError:
+            print("Invalid input, using default: 0.125")
+            mutation_prob = 0.125
+        else:
+            mutation_prob = 0.125
+    else:
+        mutation_prob = 0.125
+    
+    print(f"Mutation probability: {mutation_prob}\n")
+    
+    # Debug mode
+    debug_input = input("Enable debug mode? (y/n, press Enter for default value of n): ").strip().lower()
+    if debug_input in ['y', 'yes']:
+        debug_mode = True
+    else:
+        debug_mode = False
+    
+    print(f"Debug mode: {'Enabled' if debug_mode else 'Disabled'}\n")
+    
+    # Summary
+    print("=" * 60)
+    print("OPTIMIZATION PARAMETERS SUMMARY")
+    print("=" * 60)
+    print(f"Weather File: {weather_file}")
+    print(f"Number of Generations: {generations}")
+    print(f"Population Size: {population_size}")
+    print(f"Crossover Probability: {crossover_prob}")
+    print(f"Mutation Probability: {mutation_prob}")
+    print(f"Debug Mode: {'Enabled' if debug_mode else 'Disabled'}")
+    print("=" * 60)
+    
+    # Confirm before proceeding
+    confirm = input("\nProceed with these parameters? (y/n, press Enter for yes): ").strip().lower()
+    if confirm in ['n', 'no']:
+        print("Setup cancelled. Exiting...")
+        exit(0)
+    
+    print("\nStarting optimization...\n")
+    
+    return {
+        'weather': weather_file,
+        'generations': generations,
+        'population_size': population_size,
+        'crossover_prob': crossover_prob,
+        'mutation_prob': mutation_prob,
+        'debug': debug_mode
+    }
+
+
+def main(debug_mode=False, weather_file=None, n_generations=None, population_size=None, crossover_prob=None, mutation_prob=None):
     # Create shared cache manager
     shared_cache = create_shared_cache()
     
@@ -619,17 +757,41 @@ def main(debug_mode=False):
         print("Running in single-threaded mode")
     
     # Define problem - pass shared cache to all worker processes
-    problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner, shared_cache=shared_cache)
+    problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner, shared_cache=shared_cache, weather_file=weather_file)
     
-    # Define callback
-    callback = EvaluationCallback(optimization_variables, shared_cache=shared_cache, debug_mode=debug_mode)
+    # Create metadata for CSV
+    metadata = {
+        'Algorithm': 'NSGA-II',
+        'Weather_File': weather_file or "Vancouver - 2021 AMY.epw",
+        'Number_of_Generations': n_generations or 100,
+        'Crossover_Probability': crossover_prob or 0.5,
+        'Mutation_Probability': mutation_prob or 0.125,
+        'Population_Size': population_size or 50,
+        'Number_of_Workers': num_workers,
+        'Debug_Mode': debug_mode
+    }
+    
+    # Print optimization parameters
+    print(f"\nOptimization Parameters:")
+    print(f"  Weather File: {metadata['Weather_File']}")
+    print(f"  Number of Generations: {metadata['Number_of_Generations']}")
+    print(f"  Crossover Probability: {metadata['Crossover_Probability']}")
+    print(f"  Mutation Probability: {metadata['Mutation_Probability']}")
+    print(f"  Population Size: {metadata['Population_Size']}")
+    print(f"  Algorithm: {metadata['Algorithm']}")
+    print(f"  Debug Mode: {metadata['Debug_Mode']}")
+    print(f"  Number of Workers: {metadata['Number_of_Workers']}")
+    print("-" * 50)
+    
+    # Define callback with metadata
+    callback = EvaluationCallback(optimization_variables, shared_cache=shared_cache, debug_mode=debug_mode, metadata=metadata)
     
     # Define algorithm with built-in duplicate elimination
     method = NSGA2(
-        pop_size=50,
+        pop_size=population_size or 50,
         sampling=IntegerRandomSampling(),
-        crossover=SBX(prob=0.5, eta=5, vtype=float, repair=RoundingRepair()),
-        mutation=PM(prob=0.125, eta=5, vtype=float, repair=RoundingRepair()),
+        crossover=SBX(prob=crossover_prob or 0.5, eta=5, vtype=float, repair=RoundingRepair()),
+        mutation=PM(prob=mutation_prob or 0.125, eta=5, vtype=float, repair=RoundingRepair()),
         eliminate_duplicates=True
     )
     
@@ -637,7 +799,7 @@ def main(debug_mode=False):
     res = minimize(
         problem,
         method,
-        termination=('n_gen', 100),
+        termination=('n_gen', n_generations or 100),
         save_history=True,
         callback=callback
     )
@@ -669,5 +831,15 @@ def main(debug_mode=False):
 
 
 if __name__ == "__main__":
-    # Set debug_mode=True to keep cache directory for debugging
-    main(debug_mode=True) 
+    # Get arguments interactively
+    args = get_interactive_arguments()
+    
+    # Run main function with parsed arguments
+    main(
+        debug_mode=args['debug'],
+        weather_file=args['weather'],
+        n_generations=args['generations'],
+        population_size=args['population_size'],
+        crossover_prob=args['crossover_prob'],
+        mutation_prob=args['mutation_prob']
+    ) 
