@@ -48,7 +48,7 @@ class EvaluationCallback(Callback):
         self._initialize_plot()
         
         # Clear screen
-        os.system('cls' if os.name == 'nt' else 'clear')
+        # os.system('cls' if os.name == 'nt' else 'clear')
     
     def notify(self, algorithm):
         self.generation += 1
@@ -197,7 +197,7 @@ class EvaluationCallback(Callback):
         header_parts.extend([
             f"{'Mech_EUI':<8}",
             f"{'Overheating':<8}",
-            f"{'Pareto':<6}"
+            f"{'Pareto_Opt':<10}"
         ])
         
         header = " ".join(header_parts)
