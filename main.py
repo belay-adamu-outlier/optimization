@@ -2,7 +2,6 @@ import numpy as np
 import json
 import multiprocessing
 import csv
-import argparse
 from datetime import datetime
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.problem import ElementwiseProblem, StarmapParallelization
@@ -22,6 +21,7 @@ from simulation_utils import (
     set_in_cache,
     save_cache_to_file
 )
+from cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer
 
 
 class EvaluationCallback(Callback):
@@ -547,11 +547,11 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             #         param_values.append(len(value))
             #     else:
             #         param_values.append(0)
-            
+            # 
             # meui = random.uniform(50, 200) + sum(param_values) * 10
             # overheating = random.uniform(0, 100) + sum(param_values) * 5
             # objective_values = [meui, overheating]
-            
+            # 
             # COMMENT OUT THE ABOVE DUMMY CODE AND UNCOMMENT BELOW FOR REAL SIMULATION
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -616,130 +616,13 @@ def load_config():
         return json.load(f)
 
 
-def get_interactive_arguments():
-    """Get all arguments interactively with clear default value prompts."""
-    print("=" * 60)
-    print("BUILDING ENVELOPE OPTIMIZATION - INTERACTIVE SETUP")
-    print("=" * 60)
-    print("Please provide the following parameters. Press Enter to use default values.\n")
-    
-    # Weather file selection
-    print("Weather file options:")
-    print("1. Vancouver - 2021 AMY.epw (default)")
-    print("2. CAN_BC_Vancouver.718920_CWEC.epw")
-    print("3. Enter custom path")
-    choice = input("Enter choice (1-3) or press Enter for default value of 1: ").strip()
-    
-    if choice == "1" or choice == "":
-        weather_file = "Vancouver - 2021 AMY.epw"
-    elif choice == "2":
-        weather_file = "CAN_BC_Vancouver.718920_CWEC.epw"
-    elif choice == "3":
-        weather_file = input("Enter weather file path: ").strip()
-    else:
-        print("Invalid choice, using default: Vancouver - 2021 AMY.epw")
-        weather_file = "Vancouver - 2021 AMY.epw"
-    
-    print(f"Selected weather file: {weather_file}\n")
-    
-    # Number of generations
-    generations_input = input("Enter number of generations (press Enter for default value of 100): ").strip()
-    if generations_input:
-        try:
-            generations = int(generations_input)
-        except ValueError:
-            print("Invalid input, using default: 100")
-            generations = 100
-    else:
-        generations = 100
-    
-    print(f"Number of generations: {generations}\n")
-    
-    # Population size
-    population_input = input("Enter population size (press Enter for default value of 50): ").strip()
-    if population_input:
-        try:
-            population_size = int(population_input)
-        except ValueError:
-            print("Invalid input, using default: 50")
-            population_size = 50
-        else:
-            population_size = 50
-    else:
-        population_size = 50
-    
-    print(f"Population size: {population_size}\n")
-    
-    # Crossover probability
-    crossover_input = input("Enter crossover probability (press Enter for default value of 0.5): ").strip()
-    if crossover_input:
-        try:
-            crossover_prob = float(crossover_input)
-        except ValueError:
-            print("Invalid input, using default: 0.5")
-            crossover_prob = 0.5
-        else:
-            crossover_prob = 0.5
-    else:
-        crossover_prob = 0.5
-    
-    print(f"Crossover probability: {crossover_prob}\n")
-    
-    # Mutation probability
-    mutation_input = input("Enter mutation probability (press Enter for default value of 0.125): ").strip()
-    if mutation_input:
-        try:
-            mutation_prob = float(mutation_input)
-        except ValueError:
-            print("Invalid input, using default: 0.125")
-            mutation_prob = 0.125
-        else:
-            mutation_prob = 0.125
-    else:
-        mutation_prob = 0.125
-    
-    print(f"Mutation probability: {mutation_prob}\n")
-    
-    # Debug mode
-    debug_input = input("Enable debug mode? (y/n, press Enter for default value of n): ").strip().lower()
-    if debug_input in ['y', 'yes']:
-        debug_mode = True
-    else:
-        debug_mode = False
-    
-    print(f"Debug mode: {'Enabled' if debug_mode else 'Disabled'}\n")
-    
-    # Summary
-    print("=" * 60)
-    print("OPTIMIZATION PARAMETERS SUMMARY")
-    print("=" * 60)
-    print(f"Weather File: {weather_file}")
-    print(f"Number of Generations: {generations}")
-    print(f"Population Size: {population_size}")
-    print(f"Crossover Probability: {crossover_prob}")
-    print(f"Mutation Probability: {mutation_prob}")
-    print(f"Debug Mode: {'Enabled' if debug_mode else 'Disabled'}")
-    print("=" * 60)
-    
-    # Confirm before proceeding
-    confirm = input("\nProceed with these parameters? (y/n, press Enter for yes): ").strip().lower()
-    if confirm in ['n', 'no']:
-        print("Setup cancelled. Exiting...")
-        exit(0)
-    
-    print("\nStarting optimization...\n")
-    
-    return {
-        'weather': weather_file,
-        'generations': generations,
-        'population_size': population_size,
-        'crossover_prob': crossover_prob,
-        'mutation_prob': mutation_prob,
-        'debug': debug_mode
-    }
+
 
 
 def main(debug_mode=False, weather_file=None, n_generations=None, population_size=None, crossover_prob=None, mutation_prob=None):
+    # Print optimization header
+    print_optimization_header()
+    
     # Create shared cache manager
     shared_cache = create_shared_cache()
     
@@ -835,6 +718,9 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     print("="*80)
     print("Best solution found: %s" % res.X)
     print("Function values: %s" % res.F)
+    
+    # Print optimization footer
+    print_optimization_footer()
     
     # Keep the plot open for viewing
     print("\nOptimization complete! Plot window will remain open.")
