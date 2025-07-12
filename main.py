@@ -15,18 +15,20 @@ import os
 import matplotlib.pyplot as plt
 from energyplus_utils import run_simulation, analyze_simulation_results
 from simulation_utils import (
-    initialize_cache, 
-    check_and_update_cache, 
-    save_global_cache, 
-    merge_all_cache_files,
-    GLOBAL_CACHE
+    create_shared_cache,
+    make_cache_key,
+    get_from_cache,
+    set_in_cache,
+    save_cache_to_file
 )
 
 
 class EvaluationCallback(Callback):
-    def __init__(self, optimization_variables):
+    def __init__(self, optimization_variables, shared_cache=None, debug_mode=False):
         super().__init__()
         self.optimization_variables = optimization_variables
+        self.shared_cache = shared_cache
+        self.debug_mode = debug_mode
         self.generation = 0
         self.all_results = []
         self.all_objectives = []  # Store all objective values for Pareto comparison
@@ -63,12 +65,12 @@ class EvaluationCallback(Callback):
             params = self._x_to_params(X[i])
             
             # Create unique key for this combination
-            combination_key = tuple(params.values())
+            combination_key = make_cache_key(params)
             
             # Check if this combination already exists
             existing_result = None
             for result in self.all_results:
-                if tuple(result.get(var_name, '') for var_name in self.variable_names) == combination_key:
+                if tuple(result.get(var_name, '') for var_name in self.variable_names) == tuple(params.values()):
                     existing_result = result
                     break
             
@@ -113,6 +115,10 @@ class EvaluationCallback(Callback):
         
         # Update the plot at the end of each generation
         self._update_plot()
+
+        # Save cache at the end of each generation if in debug mode
+        if self.debug_mode and self.shared_cache is not None:
+            save_cache_to_file(self.shared_cache, self.generation)
     
     def _x_to_params(self, x):
         """Convert optimization variables x to parameter dictionary."""
@@ -458,7 +464,7 @@ class EvaluationCallback(Callback):
 
 
 class BuildingEnvelopeProblem(ElementwiseProblem):
-    def __init__(self, optimization_variables, elementwise_runner=None):
+    def __init__(self, optimization_variables, elementwise_runner=None, shared_cache=None):
         n_var = len(optimization_variables)
         xl = np.zeros(n_var, dtype=int)
         xu = np.zeros(n_var, dtype=int)
@@ -475,6 +481,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             elementwise_runner=elementwise_runner
         )
         self.optimization_variables = optimization_variables
+        self.shared_cache = shared_cache
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
@@ -484,16 +491,41 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             params = self._x_to_params(x)
             
             # Create unique key for this combination
-            combination_key = tuple(params.values())
+            combination_key = make_cache_key(params)
             
-            # Check if this combination has already been evaluated using cache
-            cached_result = check_and_update_cache(combination_key)
-            if cached_result is not None:
-                out["F"] = cached_result
-                return
+            # Check if this combination has already been evaluated using shared cache
+            if self.shared_cache is not None:
+                cached_result = get_from_cache(self.shared_cache, combination_key)
+                if cached_result is not None:
+                    out["F"] = cached_result
+                    return
             
             # This is a new combination - run simulation
             process_id = os.getpid()
+            
+            # DUMMY SIMULATION CODE FOR TESTING - REMOVE COMMENTS AND DELETE THIS SECTION WHEN READY
+            # import random
+            # import time
+            # # Simulate some computation time
+            # time.sleep(0.1)
+            # # Generate dummy results based on parameters
+            # # Convert all parameter values to numbers for calculation
+            # param_values = []
+            # for value in params.values():
+            #     if isinstance(value, (int, float)):
+            #         param_values.append(value)
+            #     elif isinstance(value, str):
+            #         # For string values, use their length as a numeric value
+            #         param_values.append(len(value))
+            #     else:
+            #         param_values.append(0)
+            
+            # meui = random.uniform(50, 200) + sum(param_values) * 10
+            # overheating = random.uniform(0, 100) + sum(param_values) * 5
+            # objective_values = [meui, overheating]
+            
+            # COMMENT OUT THE ABOVE DUMMY CODE AND UNCOMMENT BELOW FOR REAL SIMULATION
+            
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
             output_dir = run_simulation(
                 idf_path="Building.idf",
@@ -513,13 +545,11 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 objective_values = [1000.0, 1000.0]
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
             
-            # Store results in global cache
-            GLOBAL_CACHE[combination_key] = objective_values
+            # UNCMMENT UPTO HERE FOR REAL SIMULATION
             
-            # Save cache periodically to avoid too much file I/O
-            # Every 2 evaluations should be a good balance for multiprocessing
-            if len(GLOBAL_CACHE) % 2 == 0:
-                save_global_cache()
+            # Store results in shared cache
+            if self.shared_cache is not None:
+                set_in_cache(self.shared_cache, combination_key, objective_values)
             
             out["F"] = objective_values
             
@@ -537,9 +567,6 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 params[var_name] = var_options[int(x[var_idx])]
             var_idx += 1
         return params
-
-
-# Cache functions are now imported from simulation_utils
 
 
 def load_optimization_variables():
@@ -562,11 +589,11 @@ def load_config():
 
 
 def main(debug_mode=False):
-    # Initialize cache directory for this run
-    initialize_cache()
+    # Create shared cache manager
+    shared_cache = create_shared_cache()
     
     if debug_mode:
-        print(f"DEBUG MODE: Cache directory will be preserved for inspection")
+        print(f"DEBUG MODE: Shared cache will be preserved for inspection")
     
     # Load optimization variables
     optimization_variables = load_optimization_variables()
@@ -591,17 +618,17 @@ def main(debug_mode=False):
         runner = None
         print("Running in single-threaded mode")
     
-    # Define problem - always pass elementwise_runner (None is fine for single-threaded)
-    problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner)
+    # Define problem - pass shared cache to all worker processes
+    problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner, shared_cache=shared_cache)
     
     # Define callback
-    callback = EvaluationCallback(optimization_variables)
+    callback = EvaluationCallback(optimization_variables, shared_cache=shared_cache, debug_mode=debug_mode)
     
     # Define algorithm with built-in duplicate elimination
     method = NSGA2(
         pop_size=50,
         sampling=IntegerRandomSampling(),
-        crossover=SBX(prob=1, eta=5, vtype=float, repair=RoundingRepair()),
+        crossover=SBX(prob=0.5, eta=5, vtype=float, repair=RoundingRepair()),
         mutation=PM(prob=0.125, eta=5, vtype=float, repair=RoundingRepair()),
         eliminate_duplicates=True
     )
@@ -621,8 +648,9 @@ def main(debug_mode=False):
         pool.join()
         print("Closed multiprocessing pool")
     
-    # Merge all cache files and save as final cache
-    merge_all_cache_files(keep_cache_dir=debug_mode)
+    # Print final cache statistics
+    print(f"\nFinal shared cache statistics:")
+    print(f"  Total cached combinations: {len(shared_cache)}")
     
     # Save final results with updated Pareto optimality
     callback.save_final_results()
@@ -642,4 +670,4 @@ def main(debug_mode=False):
 
 if __name__ == "__main__":
     # Set debug_mode=True to keep cache directory for debugging
-    main(debug_mode=False) 
+    main(debug_mode=True) 
