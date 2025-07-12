@@ -62,17 +62,21 @@ class EvaluationCallback(Callback):
         
         # Store results for this generation (only new unique combinations)
         new_evaluations = 0
-        for i in range(len(X)):
+        total_individuals = len(X)
+        
+        for i in range(total_individuals):
             # Create parameter dictionary from X
             params = self._x_to_params(X[i])
             
             # Create unique key for this combination
             combination_key = make_cache_key(params)
             
-            # Check if this combination already exists
+            # Check if this combination already exists using the combination key
             existing_result = None
             for result in self.all_results:
-                if tuple(result.get(var_name, '') for var_name in self.variable_names) == tuple(params.values()):
+                existing_params = {var_name: result.get(var_name, '') for var_name in self.variable_names}
+                existing_key = make_cache_key(existing_params)
+                if existing_key == combination_key:
                     existing_result = result
                     break
             
@@ -111,9 +115,18 @@ class EvaluationCallback(Callback):
         # Save current generation results to CSV (only new unique solutions)
         self._save_to_csv()
                 
-        # Print efficiency info
-        print(f"\nGeneration {self.generation}: {new_evaluations} new unique evaluations out of {len(X)} total individuals")
-        print(f"Total solutions so far: {len(self.all_results)}")
+        # Print efficiency info with improved accuracy
+        print(f"\nGeneration {self.generation} Summary:")
+        print(f"  Total individuals in generation: {total_individuals}")
+        print(f"  New unique evaluations: {new_evaluations}")
+        print(f"  Duplicate evaluations skipped: {total_individuals - new_evaluations}")
+        print(f"  Total solutions evaluated so far: {len(self.all_results)}")
+        
+        # Verify the math is correct
+        if self.generation > 1:
+            previous_total = len(self.all_results) - new_evaluations
+            print(f"  Previous total: {previous_total}")
+            print(f"  Verification: {previous_total} + {new_evaluations} = {len(self.all_results)} ✓")
         
         # Update the plot at the end of each generation
         self._update_plot()
