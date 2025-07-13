@@ -11,6 +11,7 @@ This module contains comprehensive tests for all functions in simulation_utils.p
 import unittest
 import tempfile
 import os
+import json
 import pandas as pd
 from datetime import datetime
 from unittest.mock import patch, mock_open
@@ -216,20 +217,21 @@ class TestSharedCacheFunctions(unittest.TestCase):
         self.assertEqual(cache[key], value)
     
     def test_set_in_cache_with_generation(self):
-        """Test cache setting with generation info."""
+        """Test cache setting with generation info and parameters."""
         cache = create_shared_cache()
-        params = {'test': 'value'}
+        params = {'test': 'value', 'param2': 123}
         key = make_cache_key(params)
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation)
+        set_in_cache(cache, key, value, generation, params)
         
         self.assertIn(key, cache)
         cached_entry = cache[key]
         self.assertIsInstance(cached_entry, dict)
         self.assertEqual(cached_entry['objectives'], value)
         self.assertEqual(cached_entry['generation'], generation)
+        self.assertEqual(cached_entry['params'], params)
     
     def test_get_from_cache_basic(self):
         """Test basic cache retrieval."""
@@ -251,7 +253,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation)
+        set_in_cache(cache, key, value, generation, params)
         retrieved = get_from_cache(cache, key)
         
         self.assertEqual(retrieved, value)
@@ -271,12 +273,13 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation)
+        set_in_cache(cache, key, value, generation, params)
         entry = get_cache_entry(cache, key)
         
         self.assertIsInstance(entry, dict)
         self.assertEqual(entry['objectives'], value)
         self.assertEqual(entry['generation'], generation)
+        self.assertEqual(entry['params'], params)
     
     def test_get_generation_from_cache(self):
         """Test getting generation from cache."""
@@ -286,7 +289,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation)
+        set_in_cache(cache, key, value, generation, params)
         retrieved_generation = get_generation_from_cache(cache, key)
         
         self.assertEqual(retrieved_generation, generation)
@@ -325,10 +328,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         with patch('os.makedirs') as mock_makedirs, \
              patch('builtins.open', mock_open()) as mock_file, \
              patch('json.dump') as mock_json_dump, \
-             patch('simulation_utils.datetime') as mock_datetime:
-            
-            # Mock datetime to return a fixed timestamp
-            mock_datetime.now.return_value.strftime.return_value = '20231201_120000'
+             patch('os.path.exists', return_value=False):
             
             # Call the function
             save_cache_to_file(cache, 5, "test_debug_dir")
@@ -336,10 +336,11 @@ class TestSharedCacheFunctions(unittest.TestCase):
             # Verify directory creation
             mock_makedirs.assert_called_once_with("test_debug_dir", exist_ok=True)
             
-            # Verify file opening
-            expected_filename = "cache_gen5_20231201_120000.json"
+            # Verify file opening (should be called twice: once for reading, once for writing)
+            expected_filename = "cache_debug.json"
             expected_filepath = os.path.join("test_debug_dir", expected_filename)
-            mock_file.assert_called_once_with(expected_filepath, 'w')
+            self.assertEqual(mock_file.call_count, 1)  # Only write call since file doesn't exist
+            mock_file.assert_called_with(expected_filepath, 'w')
             
             # Verify JSON dump was called with the cache data
             mock_json_dump.assert_called_once()
@@ -358,9 +359,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         with patch('os.makedirs') as mock_makedirs, \
              patch('builtins.open', mock_open()) as mock_file, \
              patch('json.dump') as mock_json_dump, \
-             patch('simulation_utils.datetime') as mock_datetime:
-            
-            mock_datetime.now.return_value.strftime.return_value = '20231201_120000'
+             patch('os.path.exists', return_value=False):
             
             save_cache_to_file(cache, 1)
             
@@ -369,6 +368,50 @@ class TestSharedCacheFunctions(unittest.TestCase):
             args, kwargs = mock_json_dump.call_args
             cache_dict = args[0]
             self.assertEqual(len(cache_dict), 0)
+    
+    def test_save_cache_to_file_update_existing(self):
+        """Test updating an existing cache file with new entries."""
+        cache = create_shared_cache()
+        params1 = {'test1': 'value1'}
+        params2 = {'test2': 'value2'}
+        key1 = make_cache_key(params1)
+        key2 = make_cache_key(params2)
+        
+        set_in_cache(cache, key1, [100.0, 50.0], 1)
+        set_in_cache(cache, key2, [200.0, 75.0], 2)
+        
+        # Mock existing cache file content
+        existing_cache_content = json.dumps({
+            key1: {'objectives': [100.0, 50.0], 'generation': 1},
+            'existing_key': {'objectives': [300.0, 150.0], 'generation': 0}
+        })
+        
+        with patch('os.makedirs') as mock_makedirs, \
+             patch('builtins.open', mock_open(read_data=existing_cache_content)) as mock_file, \
+             patch('json.dump') as mock_json_dump, \
+             patch('os.path.exists', return_value=True):
+            
+            # Call the function
+            save_cache_to_file(cache, 2, "test_debug_dir")
+            
+            # Verify file was opened for reading and writing
+            expected_filename = "cache_debug.json"
+            expected_filepath = os.path.join("test_debug_dir", expected_filename)
+            
+            # Should be called twice: once for reading, once for writing
+            self.assertEqual(mock_file.call_count, 2)
+            mock_file.assert_any_call(expected_filepath, 'r')
+            mock_file.assert_any_call(expected_filepath, 'w')
+            
+            # Verify JSON dump was called with merged cache data
+            mock_json_dump.assert_called_once()
+            args, kwargs = mock_json_dump.call_args
+            cache_dict = args[0]
+            self.assertEqual(len(cache_dict), 3)  # 2 existing + 1 new
+            self.assertIn(key1, cache_dict)
+            self.assertIn(key2, cache_dict)
+            self.assertIn('existing_key', cache_dict)
+            self.assertEqual(cache_dict[key2]['objectives'], [200.0, 75.0])  # New entry
     
     def test_save_cache_to_file_exception_handling(self):
         """Test that exceptions during file saving are handled gracefully."""

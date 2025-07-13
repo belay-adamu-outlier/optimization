@@ -59,74 +59,77 @@ class EvaluationCallback(Callback):
         
         # Initialize plotting
         self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot()
+        
+        # Track cache size for calculating new evaluations
+        self.previous_cache_size = 0
     
     def notify(self, algorithm):
         self.generation += 1
+        
+        # Update the problem's generation tracking
+        if hasattr(algorithm.problem, 'set_generation'):
+            algorithm.problem.set_generation(self.generation)
         
         # Get current population
         X = algorithm.pop.get("X")
         F = algorithm.pop.get("F")
         
-        # Track results for this generation
-        new_evaluations = 0
-        skipped_evaluations = 0
+        # Calculate new evaluations and skipped evaluations based on cache size change
+        current_cache_size = len(self.shared_cache) if self.shared_cache is not None else 0
+        new_evaluations = current_cache_size - self.previous_cache_size
+        total_evaluations_in_generation = len(X)
+        skipped_evaluations = total_evaluations_in_generation - new_evaluations
         
-        for i, (x, f) in enumerate(zip(X, F)):
-            # Create parameter dictionary from X
-            params = x_to_params(x, self.optimization_variables)
-            
-            # Create unique key for this combination
-            combination_key = make_cache_key(params)
-            
-            # Check if this combination already exists in cache
-            cached_entry = get_cache_entry(self.shared_cache, combination_key)
-            
-            if cached_entry is not None:
-                # This combination has been evaluated before
-                cached_generation = get_generation_from_cache(self.shared_cache, combination_key)
+        # Update previous cache size for next generation
+        self.previous_cache_size = current_cache_size
+        
+        # Build solutions from shared cache (single source of truth)
+        self.solutions_by_key = {}
+        self.solutions_by_generation = {}
+        self.all_objectives = []
+        
+        # Process all entries in shared cache
+        if self.shared_cache is not None:
+            for combination_key, cache_entry in self.shared_cache.items():
+                if isinstance(cache_entry, dict) and 'objectives' in cache_entry:
+                    objectives = cache_entry['objectives']
+                    generation = cache_entry.get('generation', 0)
+                    params = cache_entry.get('params') # Get parameters from cache entry
+                else:
+                    # Handle old format
+                    objectives = cache_entry
+                    generation = 0
+                    params = None # No parameters in old format
                 
-                if cached_generation is not None and cached_generation < self.generation:
-                    # This is a duplicate from a previous generation - SKIP IT
-                    skipped_evaluations += 1
-                    continue
-                elif cached_generation == self.generation:
-                    # This was evaluated in current generation - already processed
-                    continue
-            
-            # This is a new combination - add it
-            new_evaluations += 1
-            
-            # Get objective values from F
-            meui = f[0]
-            overheating = f[1]
-            
-            # Create solution dictionary
-            solution_dict = {
-                'generation': self.generation,
-                'iteration': i,
-                'mechanical_energy_use_intensity': meui,
-                'average_overheating_hours': overheating,
-                'pareto_optimal': False  # Will be updated for display purposes
-            }
-            
-            # Add all parameters to solution
-            for var_name, value in params.items():
-                solution_dict[var_name] = value
-            
-            # Store in our dictionaries
-            self.solutions_by_key[combination_key] = solution_dict
-            
-            # Track by generation
-            if self.generation not in self.solutions_by_generation:
-                self.solutions_by_generation[self.generation] = []
-            self.solutions_by_generation[self.generation].append(combination_key)
-            
-            # Store objective values for Pareto comparison
-            self.all_objectives.append([meui, overheating])
-            
-            # Update cache with generation info
-            if self.shared_cache is not None:
-                set_in_cache(self.shared_cache, combination_key, [meui, overheating], self.generation)
+                meui, overheating = objectives
+                
+                # Create solution dictionary
+                solution_dict = {
+                    'generation': generation,
+                    'iteration': 0,  # We don't track individual iterations anymore
+                    'mechanical_energy_use_intensity': meui,
+                    'average_overheating_hours': overheating,
+                    'pareto_optimal': False  # Will be updated for display purposes
+                }
+                
+                # Add parameters (we need to reconstruct from key)
+                if params:
+                    for var_name in self.variable_names:
+                        solution_dict[var_name] = params.get(var_name, "N/A")
+                else:
+                    for var_name in self.variable_names:
+                        solution_dict[var_name] = "N/A"  # Placeholder
+                
+                # Store in our dictionaries
+                self.solutions_by_key[combination_key] = solution_dict
+                
+                # Track by generation
+                if generation not in self.solutions_by_generation:
+                    self.solutions_by_generation[generation] = []
+                self.solutions_by_generation[generation].append(combination_key)
+                
+                # Store objective values for Pareto comparison
+                self.all_objectives.append([meui, overheating])
         
         # Calculate current Pareto optimality for display purposes
         update_pareto_optimality_for_display(self.solutions_by_key, self.all_objectives)
@@ -139,10 +142,10 @@ class EvaluationCallback(Callback):
                 
         # Print efficiency info
         print(f"\nGeneration {self.generation} Summary:")
-        print(f"  Total individuals in generation: {len(X)}")
+        print(f"  Total individuals in generation: {total_evaluations_in_generation}")
         print(f"  New unique evaluations: {new_evaluations}")
         print(f"  Duplicate evaluations skipped: {skipped_evaluations}")
-        print(f"  Total solutions evaluated so far: {len(self.solutions_by_key)}")
+        print(f"  Total unique solutions in cache: {current_cache_size}")
         
         # Update the plot at the end of each generation
         update_plot(self.solutions_by_key, self.generation, self.fig, self.ax, self.scatter_all, self.scatter_pareto)
@@ -176,6 +179,11 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
         self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
+        self.current_generation = 0  # Track current generation
+
+    def set_generation(self, generation):
+        """Set the current generation number for tracking purposes."""
+        self.current_generation = generation
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
@@ -215,7 +223,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             # meui = random.uniform(50, 200) + sum(param_values) * 10
             # overheating = random.uniform(0, 100) + sum(param_values) * 5
             # objective_values = [meui, overheating]
-            # 
+        
             # COMMENT OUT THE ABOVE DUMMY CODE AND UNCOMMENT BELOW FOR REAL SIMULATION
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -241,7 +249,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             
             # Store results in shared cache
             if self.shared_cache is not None:
-                set_in_cache(self.shared_cache, combination_key, objective_values)
+                set_in_cache(self.shared_cache, combination_key, objective_values, generation=self.current_generation, params=params)
             
             out["F"] = objective_values
             
@@ -250,7 +258,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             print(f"Error evaluating individual: {str(e)}")
 
 
-def main(debug_mode=False, weather_file=None, n_generations=None, population_size=None, crossover_prob=None, mutation_prob=None):
+def main(debug_mode=False, weather_file=None, n_generations=None, population_size=None, crossover_prob=None, mutation_prob=None, seed=None):
     # Print optimization header
     print_optimization_header()
     
@@ -286,6 +294,15 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     # Define problem - pass shared cache to all worker processes
     problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner, shared_cache=shared_cache, weather_file=weather_file)
     
+    # Generate seed if not provided
+    if seed is None:
+        import time
+        seed = int(time.time() * 1000) % (2**32)  # Use current time in milliseconds as seed
+    
+    # Set the seed for reproducibility
+    import numpy as np
+    np.random.seed(seed)
+    
     # Create metadata for CSV
     metadata = {
         'Algorithm': 'NSGA-II',
@@ -295,7 +312,8 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
         'Mutation_Probability': mutation_prob or 0.125,
         'Population_Size': population_size or 50,
         'Number_of_Workers': num_workers,
-        'Debug_Mode': debug_mode
+        'Debug_Mode': debug_mode,
+        'Seed': seed
     }
     
     # Print optimization parameters
@@ -308,12 +326,13 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     print(f"  Algorithm: {metadata['Algorithm']}")
     print(f"  Debug Mode: {metadata['Debug_Mode']}")
     print(f"  Number of Workers: {metadata['Number_of_Workers']}")
+    print(f"  Random Seed: {metadata['Seed']}")
     print("-" * 50)
     
     # Define callback with metadata
     callback = EvaluationCallback(optimization_variables, shared_cache=shared_cache, debug_mode=debug_mode, metadata=metadata)
     
-    # Define algorithm with built-in duplicate elimination
+    # Define algorithm with built-in duplicate elimination and seeding
     method = NSGA2(
         pop_size=population_size or 50,
         sampling=IntegerRandomSampling(),
@@ -322,13 +341,14 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
         eliminate_duplicates=True
     )
     
-    # Run optimization
+    # Run optimization with seed
     res = minimize(
         problem,
         method,
         termination=('n_gen', n_generations or 100),
         save_history=True,
-        callback=callback
+        callback=callback,
+        seed=seed
     )
     
     # Clean up pool if used
@@ -371,5 +391,6 @@ if __name__ == "__main__":
         n_generations=args['generations'],
         population_size=args['population_size'],
         crossover_prob=args['crossover_prob'],
-        mutation_prob=args['mutation_prob']
+        mutation_prob=args['mutation_prob'],
+        seed=args['seed']
     ) 

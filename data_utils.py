@@ -36,25 +36,27 @@ def x_to_params(x, optimization_variables):
 
 
 def print_optimization_table(solutions_by_key, variable_names, generation):
-    """Print Pareto optimal solutions + last 100 iterations."""
+    """Print a formatted table of optimization results."""
+    if not solutions_by_key:
+        print("No solutions to display yet.")
+        return
+        
+    # Calculate column widths for variable names
+    col_widths = {}
+    for var_name in variable_names:
+        # Start with the variable name length
+        max_width = len(var_name)
+        # Check all values for this variable
+        for result in solutions_by_key.values():
+            if var_name in result:
+                value_str = str(result[var_name])
+                max_width = max(max_width, len(value_str))
+        # Add some padding and cap at reasonable length
+        col_widths[var_name] = min(max_width + 2, 15)
+    
     print(f"\n{'='*100}")
     print(f"OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
     print(f"{'='*100}")
-    
-    if not solutions_by_key:
-        return
-    
-    # More compact column widths for better terminal display
-    col_widths = {
-        'external_wall': 15,
-        'roof': 10,
-        'window': 47,
-        'infiltration_ach': 10,
-        'wwr_east': 9,
-        'wwr_west': 9,
-        'wwr_north': 9,
-        'wwr_south': 9
-    }
     
     # Create header with fixed widths
     header_parts = [
@@ -101,14 +103,16 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     
     # Add Pareto optimal solutions first
     for result in pareto_solutions:
-        combination_key = (result['generation'], result['iteration'])
+        # Use a combination of generation and objective values as unique identifier
+        combination_key = (result['generation'], result['mechanical_energy_use_intensity'], result['average_overheating_hours'])
         if combination_key not in seen_combinations:
             solutions_to_show.append(result)
             seen_combinations.add(combination_key)
     
     # Add last 100 iterations (if not already included)
     for result in last_100:
-        combination_key = (result['generation'], result['iteration'])
+        # Use a combination of generation and objective values as unique identifier
+        combination_key = (result['generation'], result['mechanical_energy_use_intensity'], result['average_overheating_hours'])
         if combination_key not in seen_combinations:
             solutions_to_show.append(result)
             seen_combinations.add(combination_key)
@@ -121,8 +125,8 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
         pareto_mark = "✓" if result['pareto_optimal'] else " "
         
         line_parts = [
-            f"{result['generation']:<3}",
-            f"{result['iteration']:<4}",
+            f"{result.get('generation') or 0:<3}",
+            f"{result.get('iteration') or 0:<4}",
         ]
         
         for var_name in variable_names:
@@ -240,8 +244,8 @@ def save_to_csv(csv_filename, solutions_by_generation, solutions_by_key, variabl
         for combination_key in solutions_by_generation[generation]:
             result = solutions_by_key[combination_key]
             row = {
-                'Generation': result['generation'],
-                'Iteration': result['iteration'],
+                'Generation': result.get('generation') or 0,
+                'Iteration': result.get('iteration') or 0,
                 'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
                 'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
                 'Pareto_Optimal': 'Pending'  # Will be updated at the end
@@ -278,8 +282,8 @@ def save_final_results(csv_filename, solutions_by_key, variable_names, metadata,
         
         for result in solutions_by_key.values():
             row = {
-                'Generation': result['generation'],
-                'Iteration': result['iteration'],
+                'Generation': result.get('generation') or 0,
+                'Iteration': result.get('iteration') or 0,
                 'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
                 'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
                 'Pareto_Optimal': 'Yes' if result['pareto_optimal'] else 'No'

@@ -26,7 +26,7 @@ Comprehensive tests for all functions in `simulation_utils.py`:
 - **Temperature Extraction**: `extract_zone_temperatures()` - Converting temperature data to DataFrames
 - **District Heating Extraction**: `extract_district_heating_from_htm()` - Extracting heating values from HTML files
 - **Shared Cache Management**: `create_shared_cache()`, `make_cache_key()`, `set_in_cache()`, `get_from_cache()`, etc. - Multiprocessing cache operations
-- **Cache File Saving**: `save_cache_to_file()` - File writing and exception handling are now fully tested via mocking
+- **Cache File Saving**: `save_cache_to_file()` - Updates existing cache file with new entries rather than creating new files each generation. File writing and exception handling are fully tested via mocking. Cache now stores parameters, objectives, and generation info for complete solution reconstruction.
 
 ## Installation
 
@@ -114,7 +114,7 @@ pytest test_simulation_utils.py::TestTemperatureExtraction::test_extract_zone_te
 - ✅ Generation retrieval from cache
 - ✅ Old format cache compatibility
 - ✅ Non-existent key handling
-- ✅ Cache file saving (file writing and error handling, including exceptions, are fully tested)
+- ✅ Cache file saving (updates existing file with new entries, file writing and error handling, including exceptions, are fully tested)
 
 ### test_energyplus_utils.py
 
@@ -162,6 +162,7 @@ pytest test_simulation_utils.py::TestTemperatureExtraction::test_extract_zone_te
 - **File Backup**: Tests include proper file backup handling for CSV operations
 - **Plot Mocking**: Uses matplotlib mocking to avoid GUI dependencies during testing
 - **File Writing**: File writing and error handling for cache saving are robustly tested using mocks
+- **Single Source of Truth**: All operations (CSV, plotting, cache file) use the same shared cache to ensure consistency
 
 ## Expected Test Results
 

@@ -41,8 +41,12 @@ def get_interactive_arguments():
     debug_mode = _get_boolean_input("Enable debug mode", False, "debug mode")
     print(f"Debug mode: {'Enabled' if debug_mode else 'Disabled'}\n")
     
+    # Random seed
+    seed = _get_seed_input()
+    print(f"Random seed: {seed if seed is not None else 'Auto-generated'}\n")
+    
     # Summary and confirmation
-    _print_summary_and_confirm(weather_file, generations, population_size, crossover_prob, mutation_prob, debug_mode)
+    _print_summary_and_confirm(weather_file, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed)
     
     return {
         'weather': weather_file,
@@ -50,7 +54,8 @@ def get_interactive_arguments():
         'population_size': population_size,
         'crossover_prob': crossover_prob,
         'mutation_prob': mutation_prob,
-        'debug': debug_mode
+        'debug': debug_mode,
+        'seed': seed
     }
 
 
@@ -125,7 +130,25 @@ def _get_boolean_input(prompt, default_value, param_name):
     return input_text in ['y', 'yes']
 
 
-def _print_summary_and_confirm(weather_file, generations, population_size, crossover_prob, mutation_prob, debug_mode):
+def _get_seed_input():
+    """Get random seed input from user with validation."""
+    input_text = input("Enter random seed (press Enter for auto-generated): ").strip()
+    
+    if not input_text:
+        return None  # Auto-generate seed
+    
+    try:
+        seed = int(input_text)
+        if seed < 0:
+            print("Invalid seed (must be non-negative), using auto-generated seed")
+            return None
+        return seed
+    except ValueError:
+        print("Invalid seed (must be integer), using auto-generated seed")
+        return None
+
+
+def _print_summary_and_confirm(weather_file, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed):
     """Print parameter summary and get user confirmation."""
     print("=" * 60)
     print("OPTIMIZATION PARAMETERS SUMMARY")
@@ -136,6 +159,7 @@ def _print_summary_and_confirm(weather_file, generations, population_size, cross
     print(f"Crossover Probability: {crossover_prob}")
     print(f"Mutation Probability: {mutation_prob}")
     print(f"Debug Mode: {'Enabled' if debug_mode else 'Disabled'}")
+    print(f"Random Seed: {seed if seed is not None else 'Auto-generated'}")
     print("=" * 60)
     
     # Confirm before proceeding

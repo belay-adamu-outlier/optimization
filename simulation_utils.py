@@ -321,10 +321,14 @@ def make_cache_key(params):
     """Create a string cache key from a params dict (tuple of values, stringified)."""
     return str(tuple(params.values()))
 
-def set_in_cache(cache, key, value, generation=None):
-    """Set a value in the shared cache with optional generation info."""
-    if generation is not None:
-        cache[key] = {'objectives': value, 'generation': generation}
+def set_in_cache(cache, key, value, generation=None, params=None):
+    """Set a value in the shared cache with optional generation info and parameters."""
+    if generation is not None or params is not None:
+        cache[key] = {
+            'objectives': value, 
+            'generation': generation,
+            'params': params
+        }
     else:
         cache[key] = value
 
@@ -358,6 +362,7 @@ def get_generation_from_cache(cache, key):
 
 def save_cache_to_file(cache, generation, debug_dir="debug_cache"):
     """Save the current shared cache to a file for debugging purposes.
+    Updates an existing cache file with new entries rather than creating a new file each generation.
     
     Args:
         cache: The shared cache dictionary
@@ -368,19 +373,36 @@ def save_cache_to_file(cache, generation, debug_dir="debug_cache"):
         # Create debug directory if it doesn't exist
         os.makedirs(debug_dir, exist_ok=True)
         
-        # Create filename with generation number and timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        cache_filename = f"cache_gen{generation}_{timestamp}.json"
+        # Use a fixed filename for the cache file (no timestamp in filename)
+        cache_filename = "cache_debug.json"
         cache_filepath = os.path.join(debug_dir, cache_filename)
         
+        # Load existing cache data if file exists
+        existing_cache = {}
+        if os.path.exists(cache_filepath):
+            try:
+                with open(cache_filepath, 'r') as f:
+                    existing_cache = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not read existing cache file: {e}")
+                existing_cache = {}
+        
         # Convert shared cache to regular dict for JSON serialization
-        cache_dict = dict(cache)
+        current_cache = dict(cache)
         
-        # Save to file
+        # Update existing cache with new entries
+        # Only add entries that are not already in the existing cache
+        new_entries = 0
+        for key, value in current_cache.items():
+            if key not in existing_cache:
+                existing_cache[key] = value
+                new_entries += 1
+        
+        # Save updated cache to file
         with open(cache_filepath, 'w') as f:
-            json.dump(cache_dict, f, indent=2)
+            json.dump(existing_cache, f, indent=2)
         
-        print(f"Debug: Saved cache with {len(cache_dict)} combinations to {cache_filename}")
+        print(f"Debug: Updated cache file with {new_entries} new entries (total: {len(existing_cache)} combinations)")
         
     except Exception as e:
         print(f"Warning: Could not save debug cache file: {e}")
