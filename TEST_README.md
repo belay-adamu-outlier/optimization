@@ -2,32 +2,16 @@
 
 This directory contains comprehensive test scenarios for the refactored building envelope optimization project using pytest.
 
-## Project Structure
-
-The project has been refactored for better modularity and maintainability:
-
-- **`main.py`** - Main optimization logic with NSGA-II algorithm
-- **`data_utils.py`** - Data processing, CSV operations, plotting, and utility functions
-- **`simulation_utils.py`** - Simulation caching and management utilities
-- **`energyplus_utils.py`** - EnergyPlus simulation and IDF manipulation functions
-- **`cli_utils.py`** - Command-line interface and user interaction utilities
-- **`overheating_analysis.py`** - Overheating analysis and calculation functions
-
 ## Test Coverage
 
 The test suite covers the following modules:
 
-### 1. `test_data_utils.py` - Data Utilities Tests
-Comprehensive tests for all functions in `data_utils.py`:
+### 1. Data Utilities Tests
 
-- **Parameter Conversion**: `x_to_params()` - Converting optimization variables to parameter dictionaries
-- **Table Printing**: `print_optimization_table()` - Displaying optimization results in formatted tables
-- **Pareto Optimality**: `update_pareto_optimality_for_display()` - Calculating Pareto optimal solutions
-- **CSV Operations**: `initialize_csv()`, `save_to_csv()`, `save_final_results()` - File I/O operations
-- **Plotting**: `initialize_plot()`, `update_plot()` - Real-time plotting during optimization
-- **Configuration**: `load_optimization_variables()`, `load_config()` - Loading project configuration
+Currently no dedicated test file for data_utils.py (removed to simplify test suite).
 
 ### 2. `test_energyplus_utils.py` - EnergyPlus Utilities Tests
+
 Tests for the top 4 functions in `energyplus_utils.py`:
 
 - **`apply_construction_to_surfaces`** - Tests applying different construction types to building surfaces
@@ -35,12 +19,19 @@ Tests for the top 4 functions in `energyplus_utils.py`:
 - **`calculate_window_geometry`** - Tests window geometry calculations with various aspect ratios
 - **`apply_wwr_to_windows`** - Tests window-to-wall ratio applications based on wall orientation
 
-### 3. `test_modify_idf_function.py` - IDF Modification Tests
-Tests for IDF file modification functionality.
+### 3. `test_simulation_utils.py` - Simulation Utilities Tests
+
+Comprehensive tests for all functions in `simulation_utils.py`:
+
+- **Temperature Extraction**: `extract_zone_temperatures()` - Converting temperature data to DataFrames
+- **District Heating Extraction**: `extract_district_heating_from_htm()` - Extracting heating values from HTML files
+- **Shared Cache Management**: `create_shared_cache()`, `make_cache_key()`, `set_in_cache()`, `get_from_cache()`, etc. - Multiprocessing cache operations
+- **Cache File Saving**: `save_cache_to_file()` - File writing and exception handling are now fully tested via mocking
 
 ## Installation
 
 1. Install test dependencies:
+
 ```bash
 pip install -r test_requirements.txt
 ```
@@ -84,67 +75,51 @@ pytest -v
 pytest --cov=. --cov-report=html -v
 
 # Run specific test file
-pytest test_data_utils.py -v
 pytest test_energyplus_utils.py -v
-pytest test_modify_idf_function.py -v
+pytest test_simulation_utils.py -v
 
 # Run specific test class
-pytest test_data_utils.py::TestParameterConversion -v
 pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces -v
+pytest test_simulation_utils.py::TestTemperatureExtraction -v
 
 # Run specific test
-pytest test_data_utils.py::TestParameterConversion::test_x_to_params_basic -v
 pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wall_construction -v
+pytest test_simulation_utils.py::TestTemperatureExtraction::test_extract_zone_temperatures_basic -v
 ```
 
 ## Test Scenarios
 
-### test_data_utils.py
+### test_simulation_utils.py
 
-#### TestParameterConversion
-- ✅ Basic parameter conversion with valid inputs
-- ✅ Handling empty optimization variables
-- ✅ Edge case with single variable
-- ✅ Large number of variables
-- ✅ Invalid index handling
+#### TestTemperatureExtraction
 
-#### TestTablePrinting
-- ✅ Basic table printing with solutions
-- ✅ Empty solutions handling
-- ✅ Single solution display
-- ✅ Large dataset handling
-- ✅ Missing variable handling
+- ✅ Basic zone temperature extraction with outdoor data
+- ✅ Zone temperature extraction without outdoor data
+- ✅ Empty temperature data handling
 
-#### TestParetoOptimality
-- ✅ Basic Pareto optimality calculation
-- ✅ Single solution (always Pareto optimal)
-- ✅ No Pareto optimal solutions
-- ✅ All solutions Pareto optimal
-- ✅ Edge case with identical objectives
+#### TestDistrictHeatingExtraction
 
-#### TestCSVOperations
-- ✅ CSV file initialization
-- ✅ Saving data to CSV
-- ✅ Final results saving with metadata
-- ✅ File backup handling
-- ✅ Error handling for file operations
+- ✅ Basic district heating extraction from HTML files
+- ✅ File not found error handling
+- ✅ No matching data error handling
+- ✅ Invalid numeric value error handling
 
-#### TestPlotting
-- ✅ Plot initialization
-- ✅ Plot updates with new data
-- ✅ Empty data handling
-- ✅ Large dataset plotting
-- ✅ Plot customization
+#### TestSharedCacheFunctions
 
-#### TestConfiguration
-- ✅ Loading optimization variables
-- ✅ Loading configuration
-- ✅ Error handling for missing files
-- ✅ Invalid JSON handling
+- ✅ Shared cache creation
+- ✅ Cache key generation
+- ✅ Basic cache setting and retrieval
+- ✅ Cache with generation info
+- ✅ Cache entry retrieval
+- ✅ Generation retrieval from cache
+- ✅ Old format cache compatibility
+- ✅ Non-existent key handling
+- ✅ Cache file saving (file writing and error handling, including exceptions, are fully tested)
 
 ### test_energyplus_utils.py
 
 #### TestApplyConstructionToSurfaces
+
 - ✅ Applying construction to wall surfaces
 - ✅ Applying construction to roof surfaces  
 - ✅ Applying construction to window surfaces
@@ -152,12 +127,14 @@ pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wal
 - ✅ Filtering outdoor vs indoor walls
 
 #### TestApplyInfiltrationToZones
+
 - ✅ Applying infiltration to zones with existing infiltration objects
 - ✅ Creating new infiltration objects when none exist
 - ✅ Proper unit conversion from 50 Pa to ambient conditions
 - ✅ Handling empty zone lists
 
 #### TestCalculateWindowGeometry
+
 - ✅ X-fixed axis window geometry calculation
 - ✅ Y-fixed axis window geometry calculation
 - ✅ Aspect ratio selection based on window area
@@ -166,6 +143,7 @@ pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wal
 - ✅ Sill height preservation
 
 #### TestApplyWwrToWindows
+
 - ✅ Applying WWR to east-facing walls
 - ✅ Applying WWR to south-facing walls
 - ✅ Applying WWR to west-facing walls
@@ -183,33 +161,23 @@ pytest test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wal
 - **Isolation**: Each test is independent and uses fresh mock objects
 - **File Backup**: Tests include proper file backup handling for CSV operations
 - **Plot Mocking**: Uses matplotlib mocking to avoid GUI dependencies during testing
+- **File Writing**: File writing and error handling for cache saving are robustly tested using mocks
 
 ## Expected Test Results
 
 When running the tests, you should see output similar to:
 
 ```
-test_data_utils.py::TestParameterConversion::test_x_to_params_basic PASSED
-test_data_utils.py::TestParameterConversion::test_x_to_params_empty PASSED
-test_data_utils.py::TestTablePrinting::test_print_optimization_table_basic PASSED
+test_simulation_utils.py::TestTemperatureExtraction::test_extract_zone_temperatures_basic PASSED
+test_simulation_utils.py::TestDistrictHeatingExtraction::test_extract_district_heating_basic PASSED
+test_simulation_utils.py::TestSharedCacheFunctions::test_create_shared_cache PASSED
 ...
 test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_wall_construction PASSED
 test_energyplus_utils.py::TestApplyConstructionToSurfaces::test_apply_roof_construction PASSED
-test_modify_idf_function.py::TestModifyIdfFunction::test_modify_idf_function PASSED
 ...
 ```
 
 All tests should pass, indicating that the refactored functions work correctly under various scenarios.
-
-## Refactoring Benefits
-
-The refactoring process has provided several benefits:
-
-1. **Modularity**: Functions are now organized by purpose in separate modules
-2. **Maintainability**: Easier to locate and modify specific functionality
-3. **Testability**: Each module can be tested independently
-4. **Readability**: Main optimization logic is cleaner and more focused
-5. **Reusability**: Utility functions can be easily imported and used elsewhere
 
 ## Adding New Tests
 

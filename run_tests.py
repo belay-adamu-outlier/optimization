@@ -90,12 +90,7 @@ def list_available_tests():
     
     print("\nAvailable test classes:")
     print("Data Utils Tests:")
-    print("  - TestParameterConversion")
-    print("  - TestTablePrinting")
-    print("  - TestParetoOptimality")
-    print("  - TestCSVOperations")
-    print("  - TestPlotting")
-    print("  - TestConfiguration")
+    print("  - (No data utilities tests currently)")
     
     print("\nEnergyPlus Utils Tests:")
     print("  - TestApplyConstructionToSurfaces")
@@ -103,8 +98,13 @@ def list_available_tests():
     print("  - TestCalculateWindowGeometry")
     print("  - TestApplyWwrToWindows")
     
+    print("\nSimulation Utils Tests:")
+    print("  - TestTemperatureExtraction")
+    print("  - TestDistrictHeatingExtraction")
+    print("  - TestSharedCacheFunctions")
+    
     print("\nIDF Modification Tests:")
-    print("  - TestModifyIdfFunction")
+    print("  - (No IDF modification tests currently)")
     
     print("\nTo see all individual tests:")
     cmd = [
