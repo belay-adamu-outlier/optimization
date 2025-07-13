@@ -1,7 +1,5 @@
-import numpy as np
-import json
 import multiprocessing
-import csv
+import numpy as np
 from datetime import datetime
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.problem import ElementwiseProblem, StarmapParallelization
@@ -24,6 +22,18 @@ from simulation_utils import (
     save_cache_to_file
 )
 from cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer
+from data_utils import (
+    x_to_params,
+    print_optimization_table,
+    update_pareto_optimality_for_display,
+    initialize_csv,
+    save_to_csv,
+    save_final_results,
+    initialize_plot,
+    update_plot,
+    load_optimization_variables,
+    load_config
+)
 
 
 class EvaluationCallback(Callback):
@@ -45,10 +55,10 @@ class EvaluationCallback(Callback):
         
         # Initialize CSV file
         self.csv_filename = f"optimization_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        self._initialize_csv()
+        initialize_csv(self.csv_filename, self.variable_names, self.metadata)
         
         # Initialize plotting
-        self._initialize_plot()
+        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot()
     
     def notify(self, algorithm):
         self.generation += 1
@@ -63,7 +73,7 @@ class EvaluationCallback(Callback):
         
         for i, (x, f) in enumerate(zip(X, F)):
             # Create parameter dictionary from X
-            params = self._x_to_params(x)
+            params = x_to_params(x, self.optimization_variables)
             
             # Create unique key for this combination
             combination_key = make_cache_key(params)
@@ -119,13 +129,13 @@ class EvaluationCallback(Callback):
                 set_in_cache(self.shared_cache, combination_key, [meui, overheating], self.generation)
         
         # Calculate current Pareto optimality for display purposes
-        self._update_pareto_optimality_for_display()
+        update_pareto_optimality_for_display(self.solutions_by_key, self.all_objectives)
         
         # Print comprehensive table
-        self._print_table()
+        print_optimization_table(self.solutions_by_key, self.variable_names, self.generation)
         
         # Save current generation results to CSV
-        self._save_to_csv()
+        save_to_csv(self.csv_filename, self.solutions_by_generation, self.solutions_by_key, self.variable_names, self.generation)
                 
         # Print efficiency info
         print(f"\nGeneration {self.generation} Summary:")
@@ -135,373 +145,15 @@ class EvaluationCallback(Callback):
         print(f"  Total solutions evaluated so far: {len(self.solutions_by_key)}")
         
         # Update the plot at the end of each generation
-        self._update_plot()
+        update_plot(self.solutions_by_key, self.generation, self.fig, self.ax, self.scatter_all, self.scatter_pareto)
 
         # Save cache at the end of each generation if in debug mode
         if self.debug_mode and self.shared_cache is not None:
             save_cache_to_file(self.shared_cache, self.generation)
     
-    def _x_to_params(self, x):
-        """Convert optimization variables x to parameter dictionary."""
-        params = {}
-        var_idx = 0
-        
-        for var_name, var_options in self.optimization_variables.items():
-            if var_name.startswith('wwr_'):
-                # WWR values are percentages, convert to decimal
-                params[var_name] = var_options[int(x[var_idx])] / 100.0
-            else:
-                # Construction names
-                params[var_name] = var_options[int(x[var_idx])]
-            var_idx += 1
-        
-        return params
-    
-    def _print_table(self):
-        """Print Pareto optimal solutions + last 100 iterations."""
-        print(f"\n{'='*100}")
-        print(f"OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
-        print(f"{'='*100}")
-        
-        if not self.solutions_by_key:
-            return
-        
-        # More compact column widths for better terminal display
-        col_widths = {
-            'external_wall': 15,
-            'roof': 10,
-            'window': 47,
-            'infiltration_ach': 10,
-            'wwr_east': 9,
-            'wwr_west': 9,
-            'wwr_north': 9,
-            'wwr_south': 9
-        }
-        
-        # Create header with fixed widths
-        header_parts = [
-            f"{'Gen':<3}",
-            f"{'Iter':<4}",
-        ]
-        
-        for var_name in self.variable_names:
-            if var_name in col_widths:
-                name = var_name
-                max_width = col_widths[var_name]
-                if len(name) > max_width:
-                    name = name[:max_width-3] + "..."
-                header_parts.append(f"{name:<{max_width}}")
-            else:
-                name = var_name
-                max_width = 8
-                if len(name) > max_width:
-                    name = name[:5] + "..."
-                header_parts.append(f"{name:<{max_width}}")
-        
-        header_parts.extend([
-            f"{'Mech_EUI':<8}",
-            f"{'Overheating':<8}",
-            f"{'Pareto_Opt':<10}"
-        ])
-        
-        header = " ".join(header_parts)
-        print(header)
-        print("-" * len(header))
-        
-        # Get all solutions as a list for processing
-        all_solutions = list(self.solutions_by_key.values())
-        
-        # Get Pareto optimal solutions
-        pareto_solutions = [result for result in all_solutions if result['pareto_optimal']]
-        
-        # Get last 100 iterations (or all if less than 100)
-        last_100 = all_solutions[-100:] if len(all_solutions) > 100 else all_solutions
-        
-        # Combine Pareto optimal and last 100, removing duplicates
-        solutions_to_show = []
-        seen_combinations = set()
-        
-        # Add Pareto optimal solutions first
-        for result in pareto_solutions:
-            combination_key = (result['generation'], result['iteration'])
-            if combination_key not in seen_combinations:
-                solutions_to_show.append(result)
-                seen_combinations.add(combination_key)
-        
-        # Add last 100 iterations (if not already included)
-        for result in last_100:
-            combination_key = (result['generation'], result['iteration'])
-            if combination_key not in seen_combinations:
-                solutions_to_show.append(result)
-                seen_combinations.add(combination_key)
-        
-        # Sort by generation and iteration for better readability
-        solutions_to_show.sort(key=lambda x: (x['generation'], x['iteration']))
-        
-        # Print filtered results
-        for result in solutions_to_show:
-            pareto_mark = "✓" if result['pareto_optimal'] else " "
-            
-            line_parts = [
-                f"{result['generation']:<3}",
-                f"{result['iteration']:<4}",
-            ]
-            
-            for var_name in self.variable_names:
-                if var_name in result:
-                    value = str(result[var_name])
-                    # Truncate long values and ensure proper padding
-                    if var_name in col_widths:
-                        max_width = col_widths[var_name]
-                        if len(value) > max_width:
-                            value = value[:max_width-3] + "..."
-                        line_parts.append(f"{value:<{max_width}}")
-                    else:
-                        if len(value) > 8:
-                            value = value[:5] + "..."
-                        line_parts.append(f"{value:<8}")
-                else:
-                    # Empty value - pad to the appropriate width
-                    if var_name in col_widths:
-                        line_parts.append(f"{'':<{col_widths[var_name]}}")
-                    else:
-                        line_parts.append(f"{'':<8}")
-            
-            line_parts.extend([
-                f"{result['mechanical_energy_use_intensity']:<8.3f}",
-                f"{result['average_overheating_hours']:<8.1f}",
-                f"{pareto_mark:<10}"
-            ])
-            
-            line = " ".join(line_parts)
-            print(line)
-        
-        # Print summary
-        total_solutions = len(self.solutions_by_key)
-        pareto_count = len(pareto_solutions)
-        shown_count = len(solutions_to_show)
-        print(f"\nSummary:")
-        print(f"  Total solutions evaluated: {total_solutions}")
-        print(f"  Pareto optimal solutions: {pareto_count}")
-        print(f"  Solutions shown: {shown_count}")
-        print(f"  Current generation: {self.generation}")
-    
-    def _update_pareto_optimality(self):
-        """Update Pareto optimality for all solutions found so far."""
-        if not self.all_objectives:
-            return
-            
-        all_F = np.array(self.all_objectives)
-        n_solutions = len(all_F)
-        pareto_optimal = np.ones(n_solutions, dtype=bool)
-        
-        for i in range(n_solutions):
-            for j in range(n_solutions):
-                if i != j:
-                    # Check if solution j dominates solution i
-                    if np.all(all_F[j] <= all_F[i]) and np.any(all_F[j] < all_F[i]):
-                        pareto_optimal[i] = False
-                        break
-        
-        # Update the pareto_optimal flag in solutions_by_key
-        solution_keys = list(self.solutions_by_key.keys())
-        for i, key in enumerate(solution_keys):
-            if i < len(pareto_optimal):
-                self.solutions_by_key[key]['pareto_optimal'] = pareto_optimal[i]
-    
-    def _update_pareto_optimality_for_display(self):
-        """Update Pareto optimality for display purposes (scatter plot and table)."""
-        if not self.all_objectives:
-            return
-            
-        all_F = np.array(self.all_objectives)
-        n_solutions = len(all_F)
-        pareto_optimal = np.ones(n_solutions, dtype=bool)
-        
-        for i in range(n_solutions):
-            for j in range(n_solutions):
-                if i != j:
-                    # Check if solution j dominates solution i
-                    if np.all(all_F[j] <= all_F[i]) and np.any(all_F[j] < all_F[i]):
-                        pareto_optimal[i] = False
-                        break
-        
-        # Update the pareto_optimal flag in solutions_by_key for display purposes
-        solution_keys = list(self.solutions_by_key.keys())
-        for i, key in enumerate(solution_keys):
-            if i < len(pareto_optimal):
-                self.solutions_by_key[key]['pareto_optimal'] = pareto_optimal[i]
-    
-    def _initialize_csv(self):
-        """Initialize the CSV file with headers and metadata."""
-        with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-            # Write metadata section
-            csvfile.write("# Optimization Metadata\n")
-            for key, value in self.metadata.items():
-                csvfile.write(f"# {key}: {value}\n")
-            csvfile.write("#\n")
-            
-            fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-    
-    def _save_to_csv(self):
-        """Save current generation results to CSV file."""
-        if self.generation not in self.solutions_by_generation:
-            return
-            
-        with open(self.csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            # Write all results from this generation
-            for combination_key in self.solutions_by_generation[self.generation]:
-                result = self.solutions_by_key[combination_key]
-                row = {
-                    'Generation': result['generation'],
-                    'Iteration': result['iteration'],
-                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                    'Pareto_Optimal': 'Pending'  # Will be updated at the end
-                }
-                
-                # Add all variable values
-                for var_name in self.variable_names:
-                    if var_name in result:
-                        row[var_name] = result[var_name]
-                
-                writer.writerow(row)
-    
     def save_final_results(self):
         """Save final results with updated Pareto optimality."""
-        # Update Pareto optimality one final time for final CSV
-        self._update_pareto_optimality()
-        
-        # Write all results to CSV with proper Pareto optimality
-        with open(self.csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-            # Write metadata section
-            csvfile.write("# Optimization Metadata\n")
-            for key, value in self.metadata.items():
-                csvfile.write(f"# {key}: {value}\n")
-            csvfile.write("#\n")
-            
-            fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            for result in self.solutions_by_key.values():
-                row = {
-                    'Generation': result['generation'],
-                    'Iteration': result['iteration'],
-                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                    'Pareto_Optimal': 'Yes' if result['pareto_optimal'] else 'No'
-                }
-                
-                # Add all variable values
-                for var_name in self.variable_names:
-                    if var_name in result:
-                        row[var_name] = result[var_name]
-                
-                writer.writerow(row)
-        
-        # Final plot update with final Pareto optimality
-        self._update_plot()
-        
-        # Update title to show final results
-        if self.ax is not None and self.fig is not None:
-            pareto_count = sum(1 for result in self.solutions_by_key.values() if result['pareto_optimal'])
-            self.ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(self.solutions_by_key)} Total')
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
-        
-        print(f"\nOptimization complete! Results saved to: {self.csv_filename}")
-        print(f"Pareto optimal solutions have been identified and marked in the CSV file.")
-    
-    def _initialize_plot(self):
-        """Initialize the live scatter plot."""
-        try:
-            plt.ion()  # Turn on interactive mode
-            self.fig, self.ax = plt.subplots(figsize=(10, 8))
-            self.ax.set_xlabel('Mechanical Energy Use Intensity (kWh/m²)')
-            self.ax.set_ylabel('Average Overheating Hours')
-            self.ax.set_title('Optimization Progress - Pareto Front')
-            self.ax.grid(True, alpha=0.3)
-
-            # Set default axis limits so axes are visible even with no data
-            self.ax.set_xlim(0, 1)
-            self.ax.set_ylim(0, 1)
-
-            # Create persistent scatter plot objects
-            self.scatter_all = self.ax.scatter([], [], c='blue', alpha=0.6, s=50, label='Non-Pareto Optimal')
-            self.scatter_pareto = self.ax.scatter([], [], c='red', s=100, label='Pareto Optimal')
-
-            self.ax.legend()
-            plt.tight_layout()
-            plt.show()
-            print("Plot initialized successfully!")
-        except Exception as e:
-            print(f"Error initializing plot: {e}")
-            self.fig = None
-            self.ax = None
-    
-    def _update_plot(self):
-        """Update the scatter plot with current data."""
-        if not self.solutions_by_key or self.fig is None or self.ax is None:
-            return
-        
-        try:
-            # Extract data from solutions_by_key
-            all_solutions = list(self.solutions_by_key.values())
-            meui_values = [result['mechanical_energy_use_intensity'] for result in all_solutions]
-            overheating_values = [result['average_overheating_hours'] for result in all_solutions]
-            pareto_mask = [result['pareto_optimal'] for result in all_solutions]
-            
-            # Separate Pareto optimal and non-Pareto optimal solutions
-            pareto_meui = [meui_values[i] for i in range(len(meui_values)) if pareto_mask[i]]
-            pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if pareto_mask[i]]
-            
-            non_pareto_meui = [meui_values[i] for i in range(len(meui_values)) if not pareto_mask[i]]
-            non_pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if not pareto_mask[i]]
-            
-            # Update scatter plot data (don't recreate objects)
-            if non_pareto_meui:
-                self.scatter_all.set_offsets(np.column_stack([non_pareto_meui, non_pareto_overheating]))
-            else:
-                self.scatter_all.set_offsets(np.empty((0, 2)))
-            
-            if pareto_meui:
-                self.scatter_pareto.set_offsets(np.column_stack([pareto_meui, pareto_overheating]))
-            else:
-                self.scatter_pareto.set_offsets(np.empty((0, 2)))
-            
-            # Auto-adjust axis limits
-            if meui_values:
-                x_min, x_max = min(meui_values), max(meui_values)
-                y_min, y_max = min(overheating_values), max(overheating_values)
-                
-                # Add some padding
-                x_range = x_max - x_min
-                y_range = y_max - y_min
-                if x_range > 0:
-                    self.ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
-                if y_range > 0:
-                    self.ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
-            
-            # Update title with generation info and Pareto count
-            pareto_count = sum(pareto_mask)
-            self.ax.set_title(f'Generation {self.generation} - {pareto_count} Pareto Optimal out of {len(self.solutions_by_key)} Total Solutions')
-            
-            # Update the plot with proper event loop breathing room
-            self.fig.canvas.draw()
-            self.fig.canvas.flush_events()
-            plt.pause(0.01)  # Give GUI framework time to handle events
-            
-        except Exception as e:
-            print(f"Error updating plot: {e}")
-
-
-
+        save_final_results(self.csv_filename, self.solutions_by_key, self.variable_names, self.metadata, self.ax, self.fig)
 
 
 class BuildingEnvelopeProblem(ElementwiseProblem):
@@ -527,10 +179,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
-            import os
-            from datetime import datetime
             
-            params = self._x_to_params(x)
+            params = x_to_params(x, self.optimization_variables)
             
             # Create unique key for this combination
             combination_key = make_cache_key(params)
@@ -561,7 +211,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             #         param_values.append(len(value))
             #     else:
             #         param_values.append(0)
-            # 
+            
             # meui = random.uniform(50, 200) + sum(param_values) * 10
             # overheating = random.uniform(0, 100) + sum(param_values) * 5
             # objective_values = [meui, overheating]
@@ -599,39 +249,6 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             out["F"] = [1000.0, 1000.0]
             print(f"Error evaluating individual: {str(e)}")
 
-    def _x_to_params(self, x):
-        params = {}
-        var_idx = 0
-        for var_name, var_options in self.optimization_variables.items():
-            if var_name.startswith('wwr_'):
-                params[var_name] = var_options[int(x[var_idx])] / 100.0
-            else:
-                params[var_name] = var_options[int(x[var_idx])]
-            var_idx += 1
-        return params
-
-
-def load_optimization_variables():
-    """Load optimization variables from JSON file."""
-    with open('optimization_variables.json', 'r') as f:
-        return json.load(f)
-
-
-def load_config():
-    """Load configuration from JSON file."""
-    config_path = 'config.json'
-    if not os.path.exists(config_path):
-        # Create a sample config if it doesn't exist
-        sample = {"num_workers": 1}
-        with open(config_path, 'w') as f:
-            json.dump(sample, f, indent=2)
-        return sample
-    with open(config_path, 'r') as f:
-        return json.load(f)
-
-
-
-
 
 def main(debug_mode=False, weather_file=None, n_generations=None, population_size=None, crossover_prob=None, mutation_prob=None):
     # Print optimization header
@@ -641,7 +258,7 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     shared_cache = create_shared_cache()
     
     if debug_mode:
-        print(f"DEBUG MODE: Shared cache will be preserved for inspection")
+        print("DEBUG MODE: Shared cache will be preserved for inspection")
     
     # Load optimization variables
     optimization_variables = load_optimization_variables()
@@ -652,7 +269,7 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     print(f"Using {num_workers} worker(s) for parallel evaluation.")
     
     # Print optimization variables info
-    print(f"Optimization variables loaded:")
+    print("Optimization variables loaded:")
     for var_name, var_options in optimization_variables.items():
         print(f"  {var_name}: {len(var_options)} options")
     
@@ -682,7 +299,7 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     }
     
     # Print optimization parameters
-    print(f"\nOptimization Parameters:")
+    print("\nOptimization Parameters:")
     print(f"  Weather File: {metadata['Weather_File']}")
     print(f"  Number of Generations: {metadata['Number_of_Generations']}")
     print(f"  Crossover Probability: {metadata['Crossover_Probability']}")
@@ -721,8 +338,8 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
         print("Closed multiprocessing pool")
     
     # Print final cache statistics
-    print(f"\nFinal shared cache statistics:")
-    print(f"  Total cached combinations: {len(shared_cache)}")
+    print("\nFinal shared cache statistics:")
+    print("  Total cached combinations: {len(shared_cache)}")
     
     # Save final results with updated Pareto optimality
     callback.save_final_results()

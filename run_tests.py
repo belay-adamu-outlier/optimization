@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-Test runner script for energyplus_utils.py tests.
-Provides easy ways to run tests with different options.
+Test runner script for the Building Envelope Optimization Project.
+Provides easy ways to run tests with different options for all test files.
 """
 
 import subprocess
 import sys
 import os
+import glob
+
+
+def get_test_files():
+    """Get all test files in the current directory."""
+    test_files = glob.glob("test_*.py")
+    return sorted(test_files)
 
 
 def run_tests_with_coverage():
-    """Run tests with coverage report."""
-    print("Running tests with coverage...")
+    """Run all tests with coverage report."""
+    print("Running all tests with coverage...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        "test_energyplus_utils.py", 
-        "--cov=energyplus_utils",
+        "--cov=.",
         "--cov-report=term-missing",
         "--cov-report=html",
         "-v"
@@ -24,13 +30,29 @@ def run_tests_with_coverage():
 
 
 def run_tests_verbose():
-    """Run tests with verbose output."""
-    print("Running tests with verbose output...")
+    """Run all tests with verbose output."""
+    print("Running all tests with verbose output...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        "test_energyplus_utils.py", 
         "-v", 
         "-s"
+    ]
+    subprocess.run(cmd)
+
+
+def run_tests_for_module(module_name):
+    """Run tests for a specific module."""
+    test_file = f"test_{module_name}.py"
+    if not os.path.exists(test_file):
+        print(f"Error: Test file '{test_file}' not found.")
+        print(f"Available test files: {', '.join(get_test_files())}")
+        return
+    
+    print(f"Running tests for {module_name}...")
+    cmd = [
+        sys.executable, "-m", "pytest", 
+        test_file,
+        "-v"
     ]
     subprocess.run(cmd)
 
@@ -40,7 +62,7 @@ def run_specific_test_class(test_class):
     print(f"Running tests for {test_class}...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        f"test_energyplus_utils.py::{test_class}", 
+        f"-k {test_class}", 
         "-v"
     ]
     subprocess.run(cmd)
@@ -51,7 +73,7 @@ def run_specific_test(test_name):
     print(f"Running test: {test_name}...")
     cmd = [
         sys.executable, "-m", "pytest", 
-        f"test_energyplus_utils.py::{test_name}", 
+        f"-k {test_name}", 
         "-v", 
         "-s"
     ]
@@ -60,18 +82,43 @@ def run_specific_test(test_name):
 
 def list_available_tests():
     """List all available tests."""
-    print("Available test classes:")
-    print("1. TestApplyConstructionToSurfaces")
-    print("2. TestApplyInfiltrationToZones")
-    print("3. TestCalculateWindowGeometry")
-    print("4. TestApplyWwrToWindows")
-    print("\nAvailable individual tests:")
+    test_files = get_test_files()
+    
+    print("Available test files:")
+    for i, test_file in enumerate(test_files, 1):
+        print(f"{i}. {test_file}")
+    
+    print("\nAvailable test classes:")
+    print("Data Utils Tests:")
+    print("  - TestParameterConversion")
+    print("  - TestTablePrinting")
+    print("  - TestParetoOptimality")
+    print("  - TestCSVOperations")
+    print("  - TestPlotting")
+    print("  - TestConfiguration")
+    
+    print("\nEnergyPlus Utils Tests:")
+    print("  - TestApplyConstructionToSurfaces")
+    print("  - TestApplyInfiltrationToZones")
+    print("  - TestCalculateWindowGeometry")
+    print("  - TestApplyWwrToWindows")
+    
+    print("\nIDF Modification Tests:")
+    print("  - TestModifyIdfFunction")
+    
+    print("\nTo see all individual tests:")
     cmd = [
         sys.executable, "-m", "pytest", 
-        "test_energyplus_utils.py", 
         "--collect-only", 
         "-q"
     ]
+    subprocess.run(cmd)
+
+
+def run_all_tests():
+    """Run all tests."""
+    print("Running all tests...")
+    cmd = [sys.executable, "-m", "pytest", "-v"]
     subprocess.run(cmd)
 
 
@@ -81,12 +128,17 @@ def main():
         print("Usage:")
         print("  python run_tests.py [option]")
         print("\nOptions:")
-        print("  coverage    - Run tests with coverage report")
-        print("  verbose     - Run tests with verbose output")
+        print("  coverage    - Run all tests with coverage report")
+        print("  verbose     - Run all tests with verbose output")
         print("  list        - List all available tests")
+        print("  module <name> - Run tests for specific module (e.g., data_utils, energyplus_utils)")
         print("  class <name> - Run tests for specific class")
         print("  test <name>  - Run specific test")
         print("  all         - Run all tests (default)")
+        print("\nExamples:")
+        print("  python run_tests.py module data_utils")
+        print("  python run_tests.py class TestParameterConversion")
+        print("  python run_tests.py test test_x_to_params_basic")
         return
     
     option = sys.argv[1].lower()
@@ -97,14 +149,14 @@ def main():
         run_tests_verbose()
     elif option == "list":
         list_available_tests()
+    elif option == "module" and len(sys.argv) > 2:
+        run_tests_for_module(sys.argv[2])
     elif option == "class" and len(sys.argv) > 2:
         run_specific_test_class(sys.argv[2])
     elif option == "test" and len(sys.argv) > 2:
         run_specific_test(sys.argv[2])
     elif option == "all":
-        print("Running all tests...")
-        cmd = [sys.executable, "-m", "pytest", "test_energyplus_utils.py", "-v"]
-        subprocess.run(cmd)
+        run_all_tests()
     else:
         print("Invalid option. Use 'python run_tests.py' for help.")
 
