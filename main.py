@@ -19,6 +19,8 @@ from simulation_utils import (
     make_cache_key,
     get_from_cache,
     set_in_cache,
+    get_cache_entry,
+    get_generation_from_cache,
     save_cache_to_file
 )
 from cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer
@@ -32,10 +34,11 @@ class EvaluationCallback(Callback):
         self.debug_mode = debug_mode
         self.metadata = metadata or {}
         self.generation = 0
-        self.all_results = []
-        self.all_objectives = []  # Store all objective values for Pareto comparison
-        self.unique_combinations = set()  # Track unique combinations
-        self.generation_results = []  # Store results for current generation
+        
+        # Use dictionaries for efficient lookups instead of lists
+        self.solutions_by_key = {}  # combination_key -> solution_dict
+        self.solutions_by_generation = {}  # generation -> list of combination_keys
+        self.all_objectives = []  # Keep for Pareto comparison (list of [meui, overheating])
         
         # Get variable names for flexible headers
         self.variable_names = list(optimization_variables.keys())
@@ -46,9 +49,6 @@ class EvaluationCallback(Callback):
         
         # Initialize plotting
         self._initialize_plot()
-        
-        # Clear screen
-        # os.system('cls' if os.name == 'nt' else 'clear')
     
     def notify(self, algorithm):
         self.generation += 1
@@ -57,76 +57,82 @@ class EvaluationCallback(Callback):
         X = algorithm.pop.get("X")
         F = algorithm.pop.get("F")
         
-        # Clear generation results for new generation
-        self.generation_results = []
-        
-        # Store results for this generation (only new unique combinations)
+        # Track results for this generation
         new_evaluations = 0
-        total_individuals = len(X)
+        skipped_evaluations = 0
         
-        for i in range(total_individuals):
+        for i, (x, f) in enumerate(zip(X, F)):
             # Create parameter dictionary from X
-            params = self._x_to_params(X[i])
+            params = self._x_to_params(x)
             
             # Create unique key for this combination
             combination_key = make_cache_key(params)
             
-            # Check if this combination already exists using the combination key
-            existing_result = None
-            for result in self.all_results:
-                existing_params = {var_name: result.get(var_name, '') for var_name in self.variable_names}
-                existing_key = make_cache_key(existing_params)
-                if existing_key == combination_key:
-                    existing_result = result
-                    break
+            # Check if this combination already exists in cache
+            cached_entry = get_cache_entry(self.shared_cache, combination_key)
             
-            if existing_result:
-                # This is a duplicate - SKIP IT ENTIRELY
-                # Don't add to generation_results, don't update anything
-                # Just move on to the next individual
-                continue
-
+            if cached_entry is not None:
+                # This combination has been evaluated before
+                cached_generation = get_generation_from_cache(self.shared_cache, combination_key)
+                
+                if cached_generation is not None and cached_generation < self.generation:
+                    # This is a duplicate from a previous generation - SKIP IT
+                    skipped_evaluations += 1
+                    continue
+                elif cached_generation == self.generation:
+                    # This was evaluated in current generation - already processed
+                    continue
+            
             # This is a new combination - add it
             new_evaluations += 1
-            result_dict = {
+            
+            # Get objective values from F
+            meui = f[0]
+            overheating = f[1]
+            
+            # Create solution dictionary
+            solution_dict = {
                 'generation': self.generation,
                 'iteration': i,
-                'mechanical_energy_use_intensity': F[i, 0],
-                'average_overheating_hours': F[i, 1],
+                'mechanical_energy_use_intensity': meui,
+                'average_overheating_hours': overheating,
                 'pareto_optimal': False  # Will be updated for display purposes
             }
             
-            # Add all parameters to result
+            # Add all parameters to solution
             for var_name, value in params.items():
-                result_dict[var_name] = value
+                solution_dict[var_name] = value
             
-            self.all_results.append(result_dict)
-            self.generation_results.append(result_dict)
+            # Store in our dictionaries
+            self.solutions_by_key[combination_key] = solution_dict
+            
+            # Track by generation
+            if self.generation not in self.solutions_by_generation:
+                self.solutions_by_generation[self.generation] = []
+            self.solutions_by_generation[self.generation].append(combination_key)
             
             # Store objective values for Pareto comparison
-            self.all_objectives.append([F[i, 0], F[i, 1]])
+            self.all_objectives.append([meui, overheating])
+            
+            # Update cache with generation info
+            if self.shared_cache is not None:
+                set_in_cache(self.shared_cache, combination_key, [meui, overheating], self.generation)
         
-        # Calculate current Pareto optimality for display purposes (not for CSV)
+        # Calculate current Pareto optimality for display purposes
         self._update_pareto_optimality_for_display()
         
-        # Clear screen and print comprehensive table
+        # Print comprehensive table
         self._print_table()
         
-        # Save current generation results to CSV (only new unique solutions)
+        # Save current generation results to CSV
         self._save_to_csv()
                 
-        # Print efficiency info with improved accuracy
+        # Print efficiency info
         print(f"\nGeneration {self.generation} Summary:")
-        print(f"  Total individuals in generation: {total_individuals}")
+        print(f"  Total individuals in generation: {len(X)}")
         print(f"  New unique evaluations: {new_evaluations}")
-        print(f"  Duplicate evaluations skipped: {total_individuals - new_evaluations}")
-        print(f"  Total solutions evaluated so far: {len(self.all_results)}")
-        
-        # Verify the math is correct
-        if self.generation > 1:
-            previous_total = len(self.all_results) - new_evaluations
-            print(f"  Previous total: {previous_total}")
-            print(f"  Verification: {previous_total} + {new_evaluations} = {len(self.all_results)} ✓")
+        print(f"  Duplicate evaluations skipped: {skipped_evaluations}")
+        print(f"  Total solutions evaluated so far: {len(self.solutions_by_key)}")
         
         # Update the plot at the end of each generation
         self._update_plot()
@@ -153,13 +159,11 @@ class EvaluationCallback(Callback):
     
     def _print_table(self):
         """Print Pareto optimal solutions + last 100 iterations."""
-        # Don't clear screen to avoid interfering with GUI updates
-        # Just print a separator instead
         print(f"\n{'='*100}")
         print(f"OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
         print(f"{'='*100}")
         
-        if not self.all_results:
+        if not self.solutions_by_key:
             return
         
         # More compact column widths for better terminal display
@@ -174,7 +178,7 @@ class EvaluationCallback(Callback):
             'wwr_south': 9
         }
         
-        # Create header with fixed widths - match the data formatting exactly
+        # Create header with fixed widths
         header_parts = [
             f"{'Gen':<3}",
             f"{'Iter':<4}",
@@ -204,11 +208,14 @@ class EvaluationCallback(Callback):
         print(header)
         print("-" * len(header))
         
+        # Get all solutions as a list for processing
+        all_solutions = list(self.solutions_by_key.values())
+        
         # Get Pareto optimal solutions
-        pareto_solutions = [result for result in self.all_results if result['pareto_optimal']]
+        pareto_solutions = [result for result in all_solutions if result['pareto_optimal']]
         
         # Get last 100 iterations (or all if less than 100)
-        last_100 = self.all_results[-100:] if len(self.all_results) > 100 else self.all_results
+        last_100 = all_solutions[-100:] if len(all_solutions) > 100 else all_solutions
         
         # Combine Pareto optimal and last 100, removing duplicates
         solutions_to_show = []
@@ -248,12 +255,10 @@ class EvaluationCallback(Callback):
                         max_width = col_widths[var_name]
                         if len(value) > max_width:
                             value = value[:max_width-3] + "..."
-                        # Ensure the value is padded to exactly max_width characters
                         line_parts.append(f"{value:<{max_width}}")
                     else:
                         if len(value) > 8:
                             value = value[:5] + "..."
-                        # Ensure the value is padded to exactly 8 characters
                         line_parts.append(f"{value:<8}")
                 else:
                     # Empty value - pad to the appropriate width
@@ -272,7 +277,7 @@ class EvaluationCallback(Callback):
             print(line)
         
         # Print summary
-        total_solutions = len(self.all_results)
+        total_solutions = len(self.solutions_by_key)
         pareto_count = len(pareto_solutions)
         shown_count = len(solutions_to_show)
         print(f"\nSummary:")
@@ -298,9 +303,11 @@ class EvaluationCallback(Callback):
                         pareto_optimal[i] = False
                         break
         
-        # Update the pareto_optimal flag in all_results
-        for i, result in enumerate(self.all_results):
-            result['pareto_optimal'] = pareto_optimal[i]
+        # Update the pareto_optimal flag in solutions_by_key
+        solution_keys = list(self.solutions_by_key.keys())
+        for i, key in enumerate(solution_keys):
+            if i < len(pareto_optimal):
+                self.solutions_by_key[key]['pareto_optimal'] = pareto_optimal[i]
     
     def _update_pareto_optimality_for_display(self):
         """Update Pareto optimality for display purposes (scatter plot and table)."""
@@ -319,9 +326,11 @@ class EvaluationCallback(Callback):
                         pareto_optimal[i] = False
                         break
         
-        # Update the pareto_optimal flag in all_results for display purposes
-        for i, result in enumerate(self.all_results):
-            result['pareto_optimal'] = pareto_optimal[i]
+        # Update the pareto_optimal flag in solutions_by_key for display purposes
+        solution_keys = list(self.solutions_by_key.keys())
+        for i, key in enumerate(solution_keys):
+            if i < len(pareto_optimal):
+                self.solutions_by_key[key]['pareto_optimal'] = pareto_optimal[i]
     
     def _initialize_csv(self):
         """Initialize the CSV file with headers and metadata."""
@@ -338,12 +347,16 @@ class EvaluationCallback(Callback):
     
     def _save_to_csv(self):
         """Save current generation results to CSV file."""
+        if self.generation not in self.solutions_by_generation:
+            return
+            
         with open(self.csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['Generation', 'Iteration'] + self.variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             
             # Write all results from this generation
-            for result in self.generation_results:
+            for combination_key in self.solutions_by_generation[self.generation]:
+                result = self.solutions_by_key[combination_key]
                 row = {
                     'Generation': result['generation'],
                     'Iteration': result['iteration'],
@@ -376,7 +389,7 @@ class EvaluationCallback(Callback):
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
             
-            for result in self.all_results:
+            for result in self.solutions_by_key.values():
                 row = {
                     'Generation': result['generation'],
                     'Iteration': result['iteration'],
@@ -397,8 +410,8 @@ class EvaluationCallback(Callback):
         
         # Update title to show final results
         if self.ax is not None and self.fig is not None:
-            pareto_count = sum(1 for result in self.all_results if result['pareto_optimal'])
-            self.ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(self.all_results)} Total')
+            pareto_count = sum(1 for result in self.solutions_by_key.values() if result['pareto_optimal'])
+            self.ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(self.solutions_by_key)} Total')
             self.fig.canvas.draw()
             self.fig.canvas.flush_events()
         
@@ -434,14 +447,15 @@ class EvaluationCallback(Callback):
     
     def _update_plot(self):
         """Update the scatter plot with current data."""
-        if not self.all_results or self.fig is None or self.ax is None:
+        if not self.solutions_by_key or self.fig is None or self.ax is None:
             return
         
         try:
-            # Extract data
-            meui_values = [result['mechanical_energy_use_intensity'] for result in self.all_results]
-            overheating_values = [result['average_overheating_hours'] for result in self.all_results]
-            pareto_mask = [result['pareto_optimal'] for result in self.all_results]
+            # Extract data from solutions_by_key
+            all_solutions = list(self.solutions_by_key.values())
+            meui_values = [result['mechanical_energy_use_intensity'] for result in all_solutions]
+            overheating_values = [result['average_overheating_hours'] for result in all_solutions]
+            pareto_mask = [result['pareto_optimal'] for result in all_solutions]
             
             # Separate Pareto optimal and non-Pareto optimal solutions
             pareto_meui = [meui_values[i] for i in range(len(meui_values)) if pareto_mask[i]]
@@ -476,7 +490,7 @@ class EvaluationCallback(Callback):
             
             # Update title with generation info and Pareto count
             pareto_count = sum(pareto_mask)
-            self.ax.set_title(f'Generation {self.generation} - {pareto_count} Pareto Optimal out of {len(self.all_results)} Total Solutions')
+            self.ax.set_title(f'Generation {self.generation} - {pareto_count} Pareto Optimal out of {len(self.solutions_by_key)} Total Solutions')
             
             # Update the plot with proper event loop breathing room
             self.fig.canvas.draw()

@@ -321,13 +321,40 @@ def make_cache_key(params):
     """Create a string cache key from a params dict (tuple of values, stringified)."""
     return str(tuple(params.values()))
 
+def set_in_cache(cache, key, value, generation=None):
+    """Set a value in the shared cache with optional generation info."""
+    if generation is not None:
+        cache[key] = {'objectives': value, 'generation': generation}
+    else:
+        cache[key] = value
+
 def get_from_cache(cache, key):
     """Get a value from the shared cache, or None if not present."""
+    cached_value = cache.get(key, None)
+    if cached_value is None:
+        return None
+    
+    # Handle both old format (just objectives) and new format (dict with objectives and generation)
+    if isinstance(cached_value, dict) and 'objectives' in cached_value:
+        return cached_value['objectives']
+    else:
+        return cached_value
+
+def get_cache_entry(cache, key):
+    """Get the full cache entry (objectives and generation info) from the shared cache."""
     return cache.get(key, None)
 
-def set_in_cache(cache, key, value):
-    """Set a value in the shared cache."""
-    cache[key] = value
+def get_generation_from_cache(cache, key):
+    """Get the generation number for a cached solution, or None if not found."""
+    cached_value = cache.get(key, None)
+    if cached_value is None:
+        return None
+    
+    # Handle both old format (just objectives) and new format (dict with objectives and generation)
+    if isinstance(cached_value, dict) and 'generation' in cached_value:
+        return cached_value['generation']
+    else:
+        return None
 
 def save_cache_to_file(cache, generation, debug_dir="debug_cache"):
     """Save the current shared cache to a file for debugging purposes.
