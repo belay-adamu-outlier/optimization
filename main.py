@@ -37,7 +37,13 @@ from data_utils import (
 
 
 class EvaluationCallback(Callback):
-    def __init__(self, optimization_variables, shared_cache=None, debug_mode=False, metadata=None):
+    def __init__(
+        self, 
+        optimization_variables, 
+        shared_cache=None, 
+        debug_mode=False, 
+        metadata=None
+    ):
         super().__init__()
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
@@ -72,7 +78,6 @@ class EvaluationCallback(Callback):
         
         # Get current population
         X = algorithm.pop.get("X")
-        F = algorithm.pop.get("F")
         
         # Calculate new evaluations and skipped evaluations based on cache size change
         current_cache_size = len(self.shared_cache) if self.shared_cache is not None else 0
@@ -90,11 +95,12 @@ class EvaluationCallback(Callback):
         
         # Process all entries in shared cache
         if self.shared_cache is not None:
-            for combination_key, cache_entry in self.shared_cache.items():
+            for i, (combination_key, cache_entry) in enumerate(self.shared_cache.items()):
                 if isinstance(cache_entry, dict) and 'objectives' in cache_entry:
                     objectives = cache_entry['objectives']
                     generation = cache_entry.get('generation', 0)
                     params = cache_entry.get('params') # Get parameters from cache entry
+                    iteration = i + 1
                 else:
                     # Handle old format
                     objectives = cache_entry
@@ -106,7 +112,7 @@ class EvaluationCallback(Callback):
                 # Create solution dictionary
                 solution_dict = {
                     'generation': generation,
-                    'iteration': 0,  # We don't track individual iterations anymore
+                    'iteration': iteration,
                     'mechanical_energy_use_intensity': meui,
                     'average_overheating_hours': overheating,
                     'pareto_optimal': False  # Will be updated for display purposes
@@ -138,7 +144,13 @@ class EvaluationCallback(Callback):
         print_optimization_table(self.solutions_by_key, self.variable_names, self.generation)
         
         # Save current generation results to CSV
-        save_to_csv(self.csv_filename, self.solutions_by_generation, self.solutions_by_key, self.variable_names, self.generation)
+        save_to_csv(
+            self.csv_filename, 
+            self.solutions_by_generation, 
+            self.solutions_by_key, 
+            self.variable_names, 
+            self.generation
+        )
                 
         # Print efficiency info
         print(f"\nGeneration {self.generation} Summary:")
@@ -148,7 +160,12 @@ class EvaluationCallback(Callback):
         print(f"  Total unique solutions in cache: {current_cache_size}")
         
         # Update the plot at the end of each generation
-        update_plot(self.solutions_by_key, self.generation, self.fig, self.ax, self.scatter_all, self.scatter_pareto)
+        update_plot(
+            self.solutions_by_key, 
+            self.generation, self.fig, 
+            self.ax, self.scatter_all, 
+            self.scatter_pareto
+        )
 
         # Save cache at the end of each generation if in debug mode
         if self.debug_mode and self.shared_cache is not None:
@@ -156,13 +173,29 @@ class EvaluationCallback(Callback):
     
     def save_final_results(self):
         """Save final results with updated Pareto optimality."""
-        save_final_results(self.csv_filename, self.solutions_by_key, self.variable_names, self.metadata, self.ax, self.fig)
+        save_final_results(
+            self.csv_filename, 
+            self.solutions_by_key, 
+            self.variable_names, 
+            self.metadata, self.ax, 
+            self.fig
+        )
 
 
 class BuildingEnvelopeProblem(ElementwiseProblem):
-    def __init__(self, optimization_variables, elementwise_runner=None, shared_cache=None, weather_file=None):
+    def __init__(
+        self, 
+        optimization_variables, 
+        elementwise_runner=None, 
+        shared_cache=None, 
+        weather_file=None
+    ):
         n_var = len(optimization_variables)
+        
+        # Set the lower bounds for each variable
         xl = np.zeros(n_var, dtype=int)
+        
+        # Set the upper bounds for each variable
         xu = np.zeros(n_var, dtype=int)
         for i, (var_name, var_options) in enumerate(optimization_variables.items()):
             xu[i] = len(var_options) - 1
@@ -176,6 +209,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             vtype=int,
             elementwise_runner=elementwise_runner
         )
+        
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
         self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
@@ -227,6 +261,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             # COMMENT OUT THE ABOVE DUMMY CODE AND UNCOMMENT BELOW FOR REAL SIMULATION
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+            
             output_dir = run_simulation(
                 idf_path="Building.idf",
                 weather_path=self.weather_file,
@@ -235,7 +270,9 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 output_dir=f"simulation_output_{timestamp}_pid{process_id}",
                 verbose='q'
             )
+            
             results = analyze_simulation_results(output_dir)
+            
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
@@ -249,7 +286,17 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             
             # Store results in shared cache
             if self.shared_cache is not None:
-                set_in_cache(self.shared_cache, combination_key, objective_values, generation=self.current_generation, params=params)
+                set_in_cache(
+                    self.shared_cache, 
+                    combination_key, 
+                    objective_values, 
+                    generation=self.current_generation,
+                    params=params
+                )
+                
+            # Increment iteration counter
+            # if self.iteration_counter is not None:
+            #     self.iteration_counter.value += 1
             
             out["F"] = objective_values
             
@@ -258,12 +305,22 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             print(f"Error evaluating individual: {str(e)}")
 
 
-def main(debug_mode=False, weather_file=None, n_generations=None, population_size=None, crossover_prob=None, mutation_prob=None, seed=None):
+def main(
+    debug_mode=False, 
+    weather_file=None, 
+    n_generations=None, 
+    population_size=None, 
+    crossover_prob=None, 
+    mutation_prob=None, 
+    seed=None
+):
     # Print optimization header
     print_optimization_header()
     
     # Create shared cache manager
     shared_cache = create_shared_cache()
+    
+    
     
     if debug_mode:
         print("DEBUG MODE: Shared cache will be preserved for inspection")
@@ -292,7 +349,12 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
         print("Running in single-threaded mode")
     
     # Define problem - pass shared cache to all worker processes
-    problem = BuildingEnvelopeProblem(optimization_variables, elementwise_runner=runner, shared_cache=shared_cache, weather_file=weather_file)
+    problem = BuildingEnvelopeProblem(
+        optimization_variables, 
+        elementwise_runner=runner, 
+        shared_cache=shared_cache,
+        weather_file=weather_file
+    )
     
     # Generate seed if not provided
     if seed is None:
@@ -330,7 +392,12 @@ def main(debug_mode=False, weather_file=None, n_generations=None, population_siz
     print("-" * 50)
     
     # Define callback with metadata
-    callback = EvaluationCallback(optimization_variables, shared_cache=shared_cache, debug_mode=debug_mode, metadata=metadata)
+    callback = EvaluationCallback(
+        optimization_variables, 
+        shared_cache=shared_cache, 
+        debug_mode=debug_mode, 
+        metadata=metadata
+    )
     
     # Define algorithm with built-in duplicate elimination and seeding
     method = NSGA2(
