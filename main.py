@@ -17,8 +17,6 @@ from simulation_utils import (
     make_cache_key,
     get_from_cache,
     set_in_cache,
-    get_cache_entry,
-    get_generation_from_cache,
     save_cache_to_file
 )
 from cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer

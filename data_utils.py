@@ -15,8 +15,6 @@ import os
 import csv
 import numpy as np
 import matplotlib.pyplot as plt
-from datetime import datetime
-
 
 def x_to_params(x, optimization_variables):
     """Convert optimization variables x to parameter dictionary."""
@@ -55,7 +53,7 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
         col_widths[var_name] = min(max_width + 2, 15)
     
     print(f"\n{'='*100}")
-    print(f"OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
+    print("OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
     print(f"{'='*100}")
     
     # Create header with fixed widths
@@ -104,7 +102,11 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     # Add Pareto optimal solutions first
     for result in pareto_solutions:
         # Use a combination of generation and objective values as unique identifier
-        combination_key = (result['generation'], result['mechanical_energy_use_intensity'], result['average_overheating_hours'])
+        combination_key = (
+            result['generation'], 
+            result['mechanical_energy_use_intensity'], 
+            result['average_overheating_hours']
+        )
         if combination_key not in seen_combinations:
             solutions_to_show.append(result)
             seen_combinations.add(combination_key)
@@ -112,7 +114,12 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     # Add last 100 iterations (if not already included)
     for result in last_100:
         # Use a combination of generation and objective values as unique identifier
-        combination_key = (result['generation'], result['mechanical_energy_use_intensity'], result['average_overheating_hours'])
+        combination_key = (
+            result['generation'], 
+            result['mechanical_energy_use_intensity'], 
+            result['average_overheating_hours']
+        )
+        
         if combination_key not in seen_combinations:
             solutions_to_show.append(result)
             seen_combinations.add(combination_key)
@@ -162,7 +169,7 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     total_solutions = len(solutions_by_key)
     pareto_count = len(pareto_solutions)
     shown_count = len(solutions_to_show)
-    print(f"\nSummary:")
+    print("\nSummary:")
     print(f"  Total solutions evaluated: {total_solutions}")
     print(f"  Pareto optimal solutions: {pareto_count}")
     print(f"  Solutions shown: {shown_count}")
@@ -304,7 +311,7 @@ def save_final_results(csv_filename, solutions_by_key, variable_names, metadata,
         fig.canvas.flush_events()
     
     print(f"\nOptimization complete! Results saved to: {csv_filename}")
-    print(f"Pareto optimal solutions have been identified and marked in the CSV file.")
+    print("Pareto optimal solutions have been identified and marked in the CSV file.")
 
 
 def initialize_plot():

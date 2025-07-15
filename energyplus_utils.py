@@ -11,7 +11,7 @@ import shutil
 from datetime import datetime
 from eppy.modeleditor import IDF
 from simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
-from overheating_analysis import analyze_overheating, print_overheating_analysis_results
+from overheating_analysis import analyze_overheating
 import numpy as np
 
 
@@ -225,6 +225,18 @@ def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
             setattr(fenestration, f'Vertex_{i}_Ycoordinate', y)
             setattr(fenestration, f'Vertex_{i}_Zcoordinate', z)
 
+def apply_solar_absorptance_to_surfaces(idf, materials_albedo: dict[str, float]):
+    """
+    Apply albedo to all surfaces.
+    
+    Args:
+        idf: IDF object
+        materials_albedo (dict): Dictionary containing material names and albedo values
+    """
+    materials = idf.idfobjects['MATERIAL']
+    for material in materials:
+        if material.Name in materials_albedo:
+            material.Solar_Absorptance = materials_albedo[material.Name]
 
 def modify_idf(idf, envelope_parameters, save=False, save_path=None):
     """
@@ -268,6 +280,15 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
                            envelope_parameters['wwr_west'],
                            envelope_parameters['wwr_north'],
                            envelope_parameters['wwr_south'])
+    
+    # Apply albedo
+    if 'wall_solar_absorptance' in envelope_parameters or 'roof_solar_absorptance' in envelope_parameters:
+        apply_solar_absorptance_to_surfaces(idf, {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134": envelope_parameters['wall_solar_absorptance'],
+            "Cement/plaster/mortar - cement panels wood fibres_.0134": envelope_parameters['wall_solar_absorptance'],
+            "Bitumen felt/sheet_.19": envelope_parameters['roof_solar_absorptance'],
+            "Bitumen felt/sheet_.003": envelope_parameters['roof_solar_absorptance']
+        })
     
     # Save the modified IDF file if requested
     if save:

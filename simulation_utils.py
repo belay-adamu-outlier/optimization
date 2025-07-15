@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import numpy as np
 import re
 import json
-import shutil
 from multiprocessing import Manager
 
 def parse_eso_variables(
@@ -321,12 +320,13 @@ def make_cache_key(params):
     """Create a string cache key from a params dict (tuple of values, stringified)."""
     return str(tuple(params.values()))
 
-def set_in_cache(cache, key, value, generation=None, params=None):
+def set_in_cache(cache, key, value, generation=None, iteration=None, params=None):
     """Set a value in the shared cache with optional generation info and parameters."""
     if generation is not None or params is not None:
         cache[key] = {
             'objectives': value, 
             'generation': generation,
+            'iteration': iteration,
             'params': params
         }
     else:
