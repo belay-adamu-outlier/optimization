@@ -231,7 +231,8 @@ class TestSharedCacheFunctions(unittest.TestCase):
         self.assertIsInstance(cached_entry, dict)
         self.assertEqual(cached_entry['objectives'], value)
         self.assertEqual(cached_entry['generation'], generation)
-        self.assertEqual(cached_entry['params'], params)
+        # Updated: params is now expected to be None
+        self.assertIsNone(cached_entry['params'])
     
     def test_get_from_cache_basic(self):
         """Test basic cache retrieval."""
@@ -279,7 +280,8 @@ class TestSharedCacheFunctions(unittest.TestCase):
         self.assertIsInstance(entry, dict)
         self.assertEqual(entry['objectives'], value)
         self.assertEqual(entry['generation'], generation)
-        self.assertEqual(entry['params'], params)
+        # Updated: params is now expected to be None
+        self.assertIsNone(entry['params'])
     
     def test_get_generation_from_cache(self):
         """Test getting generation from cache."""

@@ -13,7 +13,8 @@ from energyplus_utils import (
     apply_construction_to_surfaces,
     apply_infiltration_to_zones,
     calculate_window_geometry,
-    apply_wwr_to_windows
+    apply_wwr_to_windows,
+    apply_solar_absorptance_to_surfaces
 )
 
 
@@ -446,6 +447,202 @@ class TestApplyWwrToWindows:
             self.mock_parent_wall.Azimuth = azimuth
             apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
             # The function should use the correct WWR based on azimuth
+
+
+class TestApplySolarAbsorptanceToSurfaces:
+    """Test scenarios for apply_solar_absorptance_to_surfaces function."""
+    
+    def setup_method(self):
+        """Set up mock IDF object for each test."""
+        self.mock_idf = Mock()
+        
+        # Mock materials with different names
+        self.mock_material1 = Mock()
+        self.mock_material1.Name = "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134"
+        self.mock_material1.Solar_Absorptance = 0.7  # Initial value
+        
+        self.mock_material2 = Mock()
+        self.mock_material2.Name = "Bitumen felt/sheet_.19"
+        self.mock_material2.Solar_Absorptance = 0.8  # Initial value
+        
+        self.mock_material3 = Mock()
+        self.mock_material3.Name = "Unrelated Material"
+        self.mock_material3.Solar_Absorptance = 0.5  # Should not change
+        
+        # Set up idfobjects dictionary
+        self.mock_idf.idfobjects = {
+            'MATERIAL': [self.mock_material1, self.mock_material2, self.mock_material3]
+        }
+    
+    def test_apply_solar_absorptance_to_matching_materials(self):
+        """Test applying solar absorptance to materials that match the dictionary keys."""
+        materials_albedo = {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134": 0.3,
+            "Bitumen felt/sheet_.19": 0.2
+        }
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify matching materials were updated
+        assert self.mock_material1.Solar_Absorptance == 0.3
+        assert self.mock_material2.Solar_Absorptance == 0.2
+        
+        # Verify unrelated material was not changed
+        assert self.mock_material3.Solar_Absorptance == 0.5
+    
+    def test_apply_solar_absorptance_to_partial_matches(self):
+        """Test applying solar absorptance when only some materials match."""
+        materials_albedo = {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134": 0.1
+        }
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify only matching material was updated
+        assert self.mock_material1.Solar_Absorptance == 0.1
+        
+        # Verify other materials were not changed
+        assert self.mock_material2.Solar_Absorptance == 0.8
+        assert self.mock_material3.Solar_Absorptance == 0.5
+    
+    def test_apply_solar_absorptance_to_no_matches(self):
+        """Test applying solar absorptance when no materials match the dictionary keys."""
+        materials_albedo = {
+            "Non-existent Material 1": 0.1,
+            "Non-existent Material 2": 0.2
+        }
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify no materials were changed
+        assert self.mock_material1.Solar_Absorptance == 0.7
+        assert self.mock_material2.Solar_Absorptance == 0.8
+        assert self.mock_material3.Solar_Absorptance == 0.5
+    
+    def test_apply_solar_absorptance_to_empty_materials_list(self):
+        """Test applying solar absorptance when no materials exist in the IDF."""
+        mock_idf_empty = Mock()
+        mock_idf_empty.idfobjects = {'MATERIAL': []}
+        
+        materials_albedo = {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134": 0.3
+        }
+        
+        # Should not raise any exceptions
+        apply_solar_absorptance_to_surfaces(mock_idf_empty, materials_albedo)
+    
+    def test_apply_solar_absorptance_to_empty_albedo_dict(self):
+        """Test applying solar absorptance with an empty albedo dictionary."""
+        materials_albedo = {}
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify no materials were changed
+        assert self.mock_material1.Solar_Absorptance == 0.7
+        assert self.mock_material2.Solar_Absorptance == 0.8
+        assert self.mock_material3.Solar_Absorptance == 0.5
+    
+    def test_apply_solar_absorptance_with_extreme_values(self):
+        """Test applying solar absorptance with extreme values (0.0 and 1.0)."""
+        materials_albedo = {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134": 0.0,
+            "Bitumen felt/sheet_.19": 1.0
+        }
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify extreme values were applied correctly
+        assert self.mock_material1.Solar_Absorptance == 0.0
+        assert self.mock_material2.Solar_Absorptance == 1.0
+    
+    def test_apply_solar_absorptance_with_duplicate_material_names(self):
+        """Test applying solar absorptance when multiple materials have the same name."""
+        # Create duplicate material
+        mock_material1_duplicate = Mock()
+        mock_material1_duplicate.Name = "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134"
+        mock_material1_duplicate.Solar_Absorptance = 0.6
+        
+        mock_idf_with_duplicates = Mock()
+        mock_idf_with_duplicates.idfobjects = {
+            'MATERIAL': [self.mock_material1, mock_material1_duplicate, self.mock_material3]
+        }
+        
+        materials_albedo = {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134": 0.3
+        }
+        
+        apply_solar_absorptance_to_surfaces(mock_idf_with_duplicates, materials_albedo)
+        
+        # Verify both materials with the same name were updated
+        assert self.mock_material1.Solar_Absorptance == 0.3
+        assert mock_material1_duplicate.Solar_Absorptance == 0.3
+    
+    def test_apply_solar_absorptance_with_case_sensitive_matching(self):
+        """Test that material name matching is case sensitive."""
+        materials_albedo = {
+            "CEMENT/PLASTER/MORTAR - CEMENT FIBREBOARD MAGNESIUM OXYSULPHIDE BINDER_.0134": 0.3,
+            "bitumen felt/sheet_.19": 0.2
+        }
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify no materials were changed due to case mismatch
+        assert self.mock_material1.Solar_Absorptance == 0.7
+        assert self.mock_material2.Solar_Absorptance == 0.8
+        assert self.mock_material3.Solar_Absorptance == 0.5
+    
+    def test_apply_solar_absorptance_with_whitespace_differences(self):
+        """Test that material name matching is sensitive to whitespace differences."""
+        materials_albedo = {
+            "Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134 ": 0.3,  # Extra space
+            " Bitumen felt/sheet_.19": 0.2  # Leading space
+        }
+        
+        apply_solar_absorptance_to_surfaces(self.mock_idf, materials_albedo)
+        
+        # Verify no materials were changed due to whitespace differences
+        assert self.mock_material1.Solar_Absorptance == 0.7
+        assert self.mock_material2.Solar_Absorptance == 0.8
+        assert self.mock_material3.Solar_Absorptance == 0.5
+    
+    def test_apply_solar_absorptance_with_none_idf(self):
+        """Test applying solar absorptance with None IDF object."""
+        materials_albedo = {"Test Material": 0.3}
+        
+        # Should raise AttributeError when trying to access idfobjects
+        with pytest.raises(AttributeError):
+            apply_solar_absorptance_to_surfaces(None, materials_albedo)
+    
+    def test_apply_solar_absorptance_with_none_albedo_dict(self):
+        """Test applying solar absorptance with None albedo dictionary."""
+        # Should raise TypeError when trying to iterate over None
+        with pytest.raises(TypeError):
+            apply_solar_absorptance_to_surfaces(self.mock_idf, None)  # type: ignore
+    
+    def test_apply_solar_absorptance_with_missing_material_attributes(self):
+        """Test applying solar absorptance when materials don't have expected attributes."""
+        # Create material without Name attribute
+        mock_material_no_name = Mock()
+        mock_material_no_name.Solar_Absorptance = 0.5
+        # Remove the Name attribute to simulate missing attribute
+        del mock_material_no_name.Name
+        
+        # Create material without Solar_Absorptance attribute
+        mock_material_no_absorptance = Mock()
+        mock_material_no_absorptance.Name = "Test Material"
+        # Remove the Solar_Absorptance attribute to simulate missing attribute
+        del mock_material_no_absorptance.Solar_Absorptance
+        
+        mock_idf_incomplete = Mock()
+        mock_idf_incomplete.idfobjects = {
+            'MATERIAL': [mock_material_no_name, mock_material_no_absorptance]
+        }
+        
+        materials_albedo = {"Test Material": 0.3}
+        
+        # Should raise AttributeError when trying to access missing attributes
+        with pytest.raises(AttributeError):
+            apply_solar_absorptance_to_surfaces(mock_idf_incomplete, materials_albedo)
 
 
 if __name__ == "__main__":
