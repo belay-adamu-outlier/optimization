@@ -1,0 +1,34 @@
+{
+    "Dbl LoE Elec Ref Colored 6mm/13m Arg - 1001": {
+        "U-Value": 1.322,
+        "SHGC": 0.106
+    },
+    "Dbl LoE (e2=.1) Tint 6mm/13mm Air - 1002":{
+        "U-Value": 1.761,
+        "SHGC": 0.38
+    },
+    "Dbl LoE Spec Sel Tint 6mm/13mm Arg - 1003":{
+        "U-Value": 1.338,
+        "SHGC": 0.282
+    },
+    "Trp LoE Film (55) Bronze 6mm/6mm Air - 1004":{ 
+        "U-Value": 1.742,
+        "SHGC": 0.21
+    },
+    "Dbl LoE Elec Ref Colored 6mm/13mm Air - 1005":{
+        "U-Value": 1.616,
+        "SHGC": 0.119
+    },
+    "SageGlass Climatop Classic SR2.0 No Tint - 1006":{
+        "U-Value": 0.69,
+        "SHGC": 0.365
+    },
+    "Dbl LoE (e2=.1) Tint 6mm/13mm Arg - 1007":{
+        "U-Value": 1.761,
+        "SHGC": 0.38
+    },
+    "SageGlass Climatop Blue No Tint - 1008":{
+        "U-Value": 0.69,
+        "SHGC": 0.22
+    }
+}
