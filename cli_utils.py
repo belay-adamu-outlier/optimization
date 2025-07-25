@@ -21,6 +21,10 @@ def get_interactive_arguments():
     weather_file = _get_weather_file_choice()
     print(f"Selected weather file: {weather_file}\n")
     
+    # Constrained analysis
+    constrained_analysis = _get_boolean_input("Enable constrained analysis", False, "constrained analysis")
+    print(f"Constrained analysis: {'Enabled' if constrained_analysis else 'Disabled'}\n")
+    
     # Number of generations
     generations = _get_numeric_input("Enter number of generations", 100, "generations")
     print(f"Number of generations: {generations}\n")
@@ -46,10 +50,11 @@ def get_interactive_arguments():
     print(f"Random seed: {seed if seed is not None else 'Auto-generated'}\n")
     
     # Summary and confirmation
-    _print_summary_and_confirm(weather_file, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed)
+    _print_summary_and_confirm(weather_file, constrained_analysis, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed)
     
     return {
         'weather': weather_file,
+        'constrained_analysis': constrained_analysis,
         'generations': generations,
         'population_size': population_size,
         'crossover_prob': crossover_prob,
@@ -148,12 +153,13 @@ def _get_seed_input():
         return None
 
 
-def _print_summary_and_confirm(weather_file, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed):
+def _print_summary_and_confirm(weather_file, constrained_analysis, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed):
     """Print parameter summary and get user confirmation."""
     print("=" * 60)
     print("OPTIMIZATION PARAMETERS SUMMARY")
     print("=" * 60)
     print(f"Weather File: {weather_file}")
+    print(f"Constrained Analysis: {'Enabled' if constrained_analysis else 'Disabled'}")
     print(f"Number of Generations: {generations}")
     print(f"Population Size: {population_size}")
     print(f"Crossover Probability: {crossover_prob}")

@@ -33,7 +33,13 @@ def x_to_params(x, optimization_variables):
     return params
 
 
-def print_optimization_table(solutions_by_key, variable_names, generation):
+def print_optimization_table(
+    solutions_by_key, 
+    variable_names, 
+    generation, 
+    constrained_analysis=False
+):
+
     """Print a formatted table of optimization results."""
     if not solutions_by_key:
         print("No solutions to display yet.")
@@ -53,7 +59,7 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
         col_widths[var_name] = min(max_width + 2, 15)
     
     print(f"\n{'='*100}")
-    print("OPTIMIZATION RESULTS - PARETO OPTIMAL + LAST 100 ITERATIONS")
+    print(f"OPTIMIZATION RESULTS - {'PARETO OPTIMAL + ' if not constrained_analysis else ''} LAST 100 ITERATIONS")
     print(f"{'='*100}")
     
     # Create header with fixed widths
@@ -79,7 +85,7 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     header_parts.extend([
         f"{'Mech_EUI':<8}",
         f"{'Overheating':<8}",
-        f"{'Pareto_Opt':<10}"
+        f"{'Pareto_Opt':<10}" if not constrained_analysis else f"{'Max_Overheating':<8}"
     ])
     
     header = " ".join(header_parts)
@@ -90,46 +96,29 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     all_solutions = list(solutions_by_key.values())
     
     # Get Pareto optimal solutions
-    pareto_solutions = [result for result in all_solutions if result['pareto_optimal']]
+    pareto_solutions = [result for result in all_solutions if result['pareto_optimal']] if not constrained_analysis else []
     
     # Get last 100 iterations (or all if less than 100)
     last_100 = all_solutions[-100:] if len(all_solutions) > 100 else all_solutions
     
     # Combine Pareto optimal and last 100, removing duplicates
     solutions_to_show = []
-    seen_combinations = set()
     
     # Add Pareto optimal solutions first
-    for result in pareto_solutions:
-        # Use a combination of generation and objective values as unique identifier
-        combination_key = (
-            result['generation'], 
-            result['mechanical_energy_use_intensity'], 
-            result['average_overheating_hours']
-        )
-        if combination_key not in seen_combinations:
-            solutions_to_show.append(result)
-            seen_combinations.add(combination_key)
+    for result in pareto_solutions: 
+        solutions_to_show.append(result)
     
     # Add last 100 iterations (if not already included)
     for result in last_100:
-        # Use a combination of generation and objective values as unique identifier
-        combination_key = (
-            result['generation'], 
-            result['mechanical_energy_use_intensity'], 
-            result['average_overheating_hours']
-        )
-        
-        if combination_key not in seen_combinations:
-            solutions_to_show.append(result)
-            seen_combinations.add(combination_key)
+        solutions_to_show.append(result)
     
     # Sort by generation and iteration for better readability
     solutions_to_show.sort(key=lambda x: (x['generation'], x['iteration']))
     
     # Print filtered results
     for result in solutions_to_show:
-        pareto_mark = "✓" if result['pareto_optimal'] else " "
+        if not constrained_analysis:
+            pareto_mark = "✓" if result['pareto_optimal'] else " "
         
         line_parts = [
             f"{result.get('generation') or 0:<3}",
@@ -159,7 +148,7 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
         line_parts.extend([
             f"{result['mechanical_energy_use_intensity']:<8.3f}",
             f"{result['average_overheating_hours']:<8.1f}",
-            f"{pareto_mark:<10}"
+            f"{pareto_mark:<10} " if not constrained_analysis else f"{result['max_overheating_hours']:<8.1f}"
         ])
         
         line = " ".join(line_parts)
@@ -171,7 +160,8 @@ def print_optimization_table(solutions_by_key, variable_names, generation):
     shown_count = len(solutions_to_show)
     print("\nSummary:")
     print(f"  Total solutions evaluated: {total_solutions}")
-    print(f"  Pareto optimal solutions: {pareto_count}")
+    if not constrained_analysis:
+        print(f"  Pareto optimal solutions: {pareto_count}")
     print(f"  Solutions shown: {shown_count}")
     print(f"  Current generation: {generation}")
 
@@ -238,13 +228,26 @@ def initialize_csv(csv_filename, variable_names, metadata):
         writer.writeheader()
 
 
-def save_to_csv(csv_filename, solutions_by_generation, solutions_by_key, variable_names, generation):
+def save_to_csv(
+    csv_filename, 
+    solutions_by_generation, 
+    solutions_by_key, 
+    variable_names, 
+    generation, 
+    constrained_analysis=False
+):
+
     """Save current generation results to CSV file."""
     if generation not in solutions_by_generation:
         return
         
     with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Generation', 'Iteration'] + variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
+        fieldnames = ['Generation', 'Iteration'] + variable_names + [
+            'Mechanical_Energy_Use_Intensity', 
+            'Average_Overheating_Hours', 
+            'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
+        ]
+        
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         # Write all results from this generation
@@ -254,8 +257,8 @@ def save_to_csv(csv_filename, solutions_by_generation, solutions_by_key, variabl
                 'Generation': result.get('generation') or 0,
                 'Iteration': result.get('iteration') or 0,
                 'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                'Pareto_Optimal': 'Pending'  # Will be updated at the end
+                'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}" if not constrained_analysis else f"{result['max_overheating_hours']:.2f}",
+                ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): 'Pending' if not constrained_analysis else f"{result['max_overheating_hours']:.2f}"  # Will be updated at the end
             }
             
             # Add all variable values
@@ -266,14 +269,28 @@ def save_to_csv(csv_filename, solutions_by_generation, solutions_by_key, variabl
             writer.writerow(row)
 
 
-def save_final_results(csv_filename, solutions_by_key, variable_names, metadata, ax, fig):
+def save_final_results(
+    csv_filename, 
+    solutions_by_key, 
+    variable_names, 
+    metadata, 
+    ax, 
+    fig, 
+    constrained_analysis=False
+):
+    
     """Save final results with updated Pareto optimality."""
     # Update Pareto optimality one final time for final CSV
     all_objectives = []
     for result in solutions_by_key.values():
-        all_objectives.append([result['mechanical_energy_use_intensity'], result['average_overheating_hours']])
+        all_objectives.append([
+            result['mechanical_energy_use_intensity'], 
+            result['average_overheating_hours'],
+            result['max_overheating_hours'] if constrained_analysis else None
+        ])
     
-    update_pareto_optimality(solutions_by_key, all_objectives)
+    if not constrained_analysis:
+        update_pareto_optimality(solutions_by_key, all_objectives)
     
     # Write all results to CSV with proper Pareto optimality
     with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
@@ -283,7 +300,12 @@ def save_final_results(csv_filename, solutions_by_key, variable_names, metadata,
             csvfile.write(f"# {key}: {value}\n")
         csvfile.write("#\n")
         
-        fieldnames = ['Generation', 'Iteration'] + variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
+        fieldnames = ['Generation', 'Iteration'] + variable_names + [
+            'Mechanical_Energy_Use_Intensity', 
+            'Average_Overheating_Hours',
+            'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
+        ]
+        
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         
@@ -293,7 +315,7 @@ def save_final_results(csv_filename, solutions_by_key, variable_names, metadata,
                 'Iteration': result.get('iteration') or 0,
                 'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
                 'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                'Pareto_Optimal': 'Yes' if result['pareto_optimal'] else 'No'
+                ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): f"{result['max_overheating_hours']:.2f}" if constrained_analysis else ('Yes' if result['pareto_optimal'] else 'No')
             }
             
             # Add all variable values
@@ -305,31 +327,44 @@ def save_final_results(csv_filename, solutions_by_key, variable_names, metadata,
     
     # Update title to show final results
     if ax is not None and fig is not None:
-        pareto_count = sum(1 for result in solutions_by_key.values() if result['pareto_optimal'])
-        ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(solutions_by_key)} Total')
+        pareto_count = sum(1 for result in solutions_by_key.values() if result['pareto_optimal']) if not constrained_analysis else None
+        ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(solutions_by_key)} Total') if not constrained_analysis else None
         fig.canvas.draw()
         fig.canvas.flush_events()
     
     print(f"\nOptimization complete! Results saved to: {csv_filename}")
-    print("Pareto optimal solutions have been identified and marked in the CSV file.")
+    if not constrained_analysis:
+        print("Pareto optimal solutions have been identified and marked in the CSV file.")
 
 
-def initialize_plot():
+def initialize_plot(constrained_analysis=False):
     """Initialize the live scatter plot."""
     try:
         plt.ion()  # Turn on interactive mode
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.set_xlabel('Mechanical Energy Use Intensity (kWh/m²)')
-        ax.set_ylabel('Average Overheating Hours')
-        ax.set_title('Optimization Progress - Pareto Front')
+        ax.set_ylabel('Average Overheating Hours' if not constrained_analysis else 'Max Overheating Hours')
+        ax.set_title('Optimization Progress - Pareto Front' if not constrained_analysis else 'Optimization Progress - Constrained Analysis')
         ax.grid(True, alpha=0.3)
 
         # Set default axis limits so axes are visible even with no data
         ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
+        if constrained_analysis:
+            # For constrained analysis, allow negative values on y-axis
+            ax.set_ylim(-30, 10)
+        else:
+            ax.set_ylim(0, 1)
 
         # Create persistent scatter plot objects
-        scatter_all = ax.scatter([], [], c='blue', alpha=0.6, s=50, label='Non-Pareto Optimal')
+        scatter_all = ax.scatter(
+            [], 
+            [], 
+            c='blue', 
+            alpha=0.6, 
+            s=50, 
+            label='Non-Pareto Optimal' if not constrained_analysis else 'Solutions'
+        )
+        
         scatter_pareto = ax.scatter([], [], c='red', s=100, label='Pareto Optimal')
 
         ax.legend()
@@ -342,7 +377,15 @@ def initialize_plot():
         return None, None, None, None
 
 
-def update_plot(solutions_by_key, generation, fig, ax, scatter_all, scatter_pareto):
+def update_plot(
+    solutions_by_key, 
+    generation, 
+    fig, 
+    ax, 
+    scatter_all, 
+    scatter_pareto, 
+    constrained_analysis=False
+):
     """Update the scatter plot with current data."""
     if not solutions_by_key or fig is None or ax is None:
         return
@@ -351,43 +394,68 @@ def update_plot(solutions_by_key, generation, fig, ax, scatter_all, scatter_pare
         # Extract data from solutions_by_key
         all_solutions = list(solutions_by_key.values())
         meui_values = [result['mechanical_energy_use_intensity'] for result in all_solutions]
-        overheating_values = [result['average_overheating_hours'] for result in all_solutions]
-        pareto_mask = [result['pareto_optimal'] for result in all_solutions]
+        overheating_values = [result['average_overheating_hours'] if not constrained_analysis else result['max_overheating_hours'] for result in all_solutions]
         
-        # Separate Pareto optimal and non-Pareto optimal solutions
-        pareto_meui = [meui_values[i] for i in range(len(meui_values)) if pareto_mask[i]]
-        pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if pareto_mask[i]]
-        
-        non_pareto_meui = [meui_values[i] for i in range(len(meui_values)) if not pareto_mask[i]]
-        non_pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if not pareto_mask[i]]
-        
-        # Update scatter plot data (don't recreate objects)
-        if non_pareto_meui:
-            scatter_all.set_offsets(np.column_stack([non_pareto_meui, non_pareto_overheating]))
-        else:
-            scatter_all.set_offsets(np.empty((0, 2)))
-        
-        if pareto_meui:
-            scatter_pareto.set_offsets(np.column_stack([pareto_meui, pareto_overheating]))
-        else:
-            scatter_pareto.set_offsets(np.empty((0, 2)))
-        
-        # Auto-adjust axis limits
-        if meui_values:
-            x_min, x_max = min(meui_values), max(meui_values)
-            y_min, y_max = min(overheating_values), max(overheating_values)
+        if constrained_analysis:
+            # For constrained analysis: plot all solutions as mechanical energy vs average overheating
+            # No Pareto analysis needed
+            scatter_all.set_offsets(np.column_stack([meui_values, overheating_values]))
+            scatter_pareto.set_offsets(np.empty((0, 2)))  # Hide Pareto scatter
             
-            # Add some padding
-            x_range = x_max - x_min
-            y_range = y_max - y_min
-            if x_range > 0:
-                ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
-            if y_range > 0:
-                ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
-        
-        # Update title with generation info and Pareto count
-        pareto_count = sum(pareto_mask)
-        ax.set_title(f'Generation {generation} - {pareto_count} Pareto Optimal out of {len(solutions_by_key)} Total Solutions')
+            # Auto-adjust axis limits
+            if meui_values:
+                x_min, x_max = min(meui_values), max(meui_values)
+                y_min, y_max = min(overheating_values), max(overheating_values)
+                
+                # Add some padding
+                x_range = x_max - x_min
+                y_range = y_max - y_min
+                if x_range > 0:
+                    ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
+                if y_range > 0:
+                    ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+            
+            # Update title for constrained analysis
+            ax.set_title(f'Generation {generation} - Constrained Analysis ({len(solutions_by_key)} Solutions)')
+            
+        else:
+            # For unconstrained analysis: continue with Pareto analysis
+            pareto_mask = [result['pareto_optimal'] for result in all_solutions]
+            
+            # Separate Pareto optimal and non-Pareto optimal solutions
+            pareto_meui = [meui_values[i] for i in range(len(meui_values)) if pareto_mask[i]]
+            pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if pareto_mask[i]]
+            
+            non_pareto_meui = [meui_values[i] for i in range(len(meui_values)) if not pareto_mask[i]]
+            non_pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if not pareto_mask[i]]
+            
+            # Update scatter plot data (don't recreate objects)
+            if non_pareto_meui:
+                scatter_all.set_offsets(np.column_stack([non_pareto_meui, non_pareto_overheating]))
+            else:
+                scatter_all.set_offsets(np.empty((0, 2)))
+            
+            if pareto_meui:
+                scatter_pareto.set_offsets(np.column_stack([pareto_meui, pareto_overheating]))
+            else:
+                scatter_pareto.set_offsets(np.empty((0, 2)))
+            
+            # Auto-adjust axis limits
+            if meui_values:
+                x_min, x_max = min(meui_values), max(meui_values)
+                y_min, y_max = min(overheating_values), max(overheating_values)
+                
+                # Add some padding
+                x_range = x_max - x_min
+                y_range = y_max - y_min
+                if x_range > 0:
+                    ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
+                if y_range > 0:
+                    ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
+            
+            # Update title with generation info and Pareto count
+            pareto_count = sum(pareto_mask)
+            ax.set_title(f'Generation {generation} - {pareto_count} Pareto Optimal out of {len(solutions_by_key)} Total Solutions')
         
         # Update the plot with proper event loop breathing room
         fig.canvas.draw()

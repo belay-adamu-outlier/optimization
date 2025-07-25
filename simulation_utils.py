@@ -320,11 +320,21 @@ def make_cache_key(params):
     """Create a string cache key from a params dict (tuple of values, stringified)."""
     return str(tuple(params.values()))
 
-def set_in_cache(cache, key, value, generation=None, iteration=None, params=None):
+def set_in_cache(
+    cache, 
+    key, 
+    value,
+    max_overheating_hours,
+    generation=None, 
+    iteration=None, 
+    params=None
+):
+
     """Set a value in the shared cache with optional generation info and parameters."""
     if generation is not None or params is not None:
         cache[key] = {
-            'objectives': value, 
+            'objectives': value,
+            'max_overheating_hours': max_overheating_hours,
             'generation': generation,
             'iteration': iteration,
             'params': params
@@ -340,9 +350,9 @@ def get_from_cache(cache, key):
     
     # Handle both old format (just objectives) and new format (dict with objectives and generation)
     if isinstance(cached_value, dict) and 'objectives' in cached_value:
-        return cached_value['objectives']
+        return cached_value['objectives'], cached_value['max_overheating_hours']
     else:
-        return cached_value
+        return cached_value, -1
 
 def get_cache_entry(cache, key):
     """Get the full cache entry (objectives and generation info) from the shared cache."""

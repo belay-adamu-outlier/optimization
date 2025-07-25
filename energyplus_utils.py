@@ -397,8 +397,17 @@ def analyze_simulation_results(output_dir, cleanup=True):
             # print_overheating_analysis_results(overheating_results)
             
             average_overheating = overheating_results['average_overheating_hours']
+            
+            # Calculate max_overheating_hours by finding the maximum across all zones
+            max_overheating_hours = 0.0
+            if overheating_results['zone_results']:
+                max_overheating_hours = max(
+                    zone_data['overheating_hours'] 
+                    for zone_data in overheating_results['zone_results'].values()
+                )
         else:
             average_overheating = None
+            max_overheating_hours = None
             overheating_results = None
         
         results = {
@@ -406,6 +415,7 @@ def analyze_simulation_results(output_dir, cleanup=True):
             'output_directory': output_dir,
             'district_heating_kwh': district_heating,
             'average_overheating_hours': average_overheating,
+            'max_overheating_hours': max_overheating_hours,
             'overheating_results': overheating_results
         }
         
@@ -458,6 +468,7 @@ def analyze_simulation_results(output_dir, cleanup=True):
             'output_directory': None,
             'district_heating_kwh': None,
             'average_overheating_hours': None,
+            'max_overheating_hours': None,
             'overheating_results': None
         }
 

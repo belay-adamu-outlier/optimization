@@ -40,7 +40,8 @@ class EvaluationCallback(Callback):
         optimization_variables, 
         shared_cache=None, 
         debug_mode=False, 
-        metadata=None
+        metadata=None,
+        constrained_analysis=False
     ):
         super().__init__()
         self.optimization_variables = optimization_variables
@@ -48,7 +49,7 @@ class EvaluationCallback(Callback):
         self.debug_mode = debug_mode
         self.metadata = metadata or {}
         self.generation = 0
-        
+        self.constrained_analysis = constrained_analysis
         # Use dictionaries for efficient lookups instead of lists
         self.solutions_by_key = {}  # combination_key -> solution_dict
         self.solutions_by_generation = {}  # generation -> list of combination_keys
@@ -62,7 +63,7 @@ class EvaluationCallback(Callback):
         initialize_csv(self.csv_filename, self.variable_names, self.metadata)
         
         # Initialize plotting
-        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot()
+        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot(self.constrained_analysis)
         
         # Track cache size for calculating new evaluations
         self.previous_cache_size = 0
@@ -99,11 +100,7 @@ class EvaluationCallback(Callback):
                     generation = cache_entry.get('generation', 0)
                     params = cache_entry.get('params') # Get parameters from cache entry
                     iteration = i + 1
-                else:
-                    # Handle old format
-                    objectives = cache_entry
-                    generation = 0
-                    params = None # No parameters in old format
+                    max_overheating_hours = cache_entry.get('max_overheating_hours')
                 
                 meui, overheating = objectives
                 
@@ -113,7 +110,7 @@ class EvaluationCallback(Callback):
                     'iteration': iteration,
                     'mechanical_energy_use_intensity': meui,
                     'average_overheating_hours': overheating,
-                    'pareto_optimal': False  # Will be updated for display purposes
+                    ('max_overheating_hours' if self.constrained_analysis else 'pareto_optimal'): max_overheating_hours if self.constrained_analysis else False
                 }
                 
                 # Add parameters (we need to reconstruct from key)
@@ -136,10 +133,19 @@ class EvaluationCallback(Callback):
                 self.all_objectives.append([meui, overheating])
         
         # Calculate current Pareto optimality for display purposes
-        update_pareto_optimality_for_display(self.solutions_by_key, self.all_objectives)
+        if not self.constrained_analysis:
+            update_pareto_optimality_for_display(
+                self.solutions_by_key, 
+                self.all_objectives
+            )
         
         # Print comprehensive table
-        print_optimization_table(self.solutions_by_key, self.variable_names, self.generation)
+        print_optimization_table(
+            self.solutions_by_key, 
+            self.variable_names, 
+            self.generation,
+            self.constrained_analysis
+        )
         
         # Save current generation results to CSV
         save_to_csv(
@@ -162,7 +168,8 @@ class EvaluationCallback(Callback):
             self.solutions_by_key, 
             self.generation, self.fig, 
             self.ax, self.scatter_all, 
-            self.scatter_pareto
+            self.scatter_pareto,
+            self.constrained_analysis
         )
 
         # Save cache at the end of each generation if in debug mode
@@ -176,7 +183,8 @@ class EvaluationCallback(Callback):
             self.solutions_by_key, 
             self.variable_names, 
             self.metadata, self.ax, 
-            self.fig
+            self.fig,
+            self.constrained_analysis
         )
 
 
@@ -186,7 +194,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         optimization_variables, 
         elementwise_runner=None, 
         shared_cache=None, 
-        weather_file=None
+        weather_file=None,
+        constrained_analysis=False
     ):
         n_var = len(optimization_variables)
         
@@ -200,8 +209,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             
         super().__init__(
             n_var=n_var,
-            n_obj=2,
-            n_ieq_constr=0,
+            n_obj= 1 if constrained_analysis else 2,
+            n_ieq_constr= 1 if constrained_analysis else 0,
             xl=xl,
             xu=xu,
             vtype=int,
@@ -212,6 +221,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         self.shared_cache = shared_cache
         self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
         self.current_generation = 0  # Track current generation
+        self.constrained_analysis = constrained_analysis
 
     def set_generation(self, generation):
         """Set the current generation number for tracking purposes."""
@@ -229,7 +239,9 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             if self.shared_cache is not None:
                 cached_result = get_from_cache(self.shared_cache, combination_key)
                 if cached_result is not None:
-                    out["F"] = cached_result
+                    objective_values, max_overheating_hours = cached_result
+                    out["F"] = objective_values if not self.constrained_analysis else [objective_values[0]]
+                    out["G"] = [max_overheating_hours - 30]
                     return
             
             # This is a new combination - run simulation
@@ -255,7 +267,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             # meui = random.uniform(50, 200) + sum(param_values) * 10
             # overheating = random.uniform(0, 100) + sum(param_values) * 5
             # objective_values = [meui, overheating]
-        
+            # max_overheating_hours = -1
             # COMMENT OUT THE ABOVE DUMMY CODE AND UNCOMMENT BELOW FOR REAL SIMULATION
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -275,6 +287,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
                 mechanical_energy_use_intensity = district_heating / 2590.29
+                max_overheating_hours = results['max_overheating_hours'] or 0.0
                 objective_values = [mechanical_energy_use_intensity, average_overheating]
             else:
                 objective_values = [1000.0, 1000.0]
@@ -288,18 +301,17 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     self.shared_cache, 
                     combination_key, 
                     objective_values, 
+                    max_overheating_hours, 
                     generation=self.current_generation,
                     params=params
                 )
-                
-            # Increment iteration counter
-            # if self.iteration_counter is not None:
-            #     self.iteration_counter.value += 1
             
-            out["F"] = objective_values
+            out["F"] = objective_values if not self.constrained_analysis else [objective_values[0]]
+            out["G"] = [max_overheating_hours - 30]
             
         except Exception as e:
-            out["F"] = [1000.0, 1000.0]
+            out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
+            out["G"] = [1000.0]
             print(f"Error evaluating individual: {str(e)}")
 
 
@@ -310,7 +322,8 @@ def main(
     population_size=None, 
     crossover_prob=None, 
     mutation_prob=None, 
-    seed=None
+    seed=None,
+    constrained_analysis=False
 ):
     # Print optimization header
     print_optimization_header()
@@ -351,7 +364,8 @@ def main(
         optimization_variables, 
         elementwise_runner=runner, 
         shared_cache=shared_cache,
-        weather_file=weather_file
+        weather_file=weather_file,
+        constrained_analysis=constrained_analysis
     )
     
     # Generate seed if not provided
@@ -373,7 +387,8 @@ def main(
         'Population_Size': population_size or 50,
         'Number_of_Workers': num_workers,
         'Debug_Mode': debug_mode,
-        'Seed': seed
+        'Seed': seed,
+        'Constrained_Analysis': constrained_analysis
     }
     
     # Print optimization parameters
@@ -387,6 +402,7 @@ def main(
     print(f"  Debug Mode: {metadata['Debug_Mode']}")
     print(f"  Number of Workers: {metadata['Number_of_Workers']}")
     print(f"  Random Seed: {metadata['Seed']}")
+    print(f"  Constrained Analysis: {metadata['Constrained_Analysis']}")
     print("-" * 50)
     
     # Define callback with metadata
@@ -394,7 +410,8 @@ def main(
         optimization_variables, 
         shared_cache=shared_cache, 
         debug_mode=debug_mode, 
-        metadata=metadata
+        metadata=metadata,
+        constrained_analysis=constrained_analysis
     )
     
     # Define algorithm with built-in duplicate elimination and seeding
@@ -457,5 +474,6 @@ if __name__ == "__main__":
         population_size=args['population_size'],
         crossover_prob=args['crossover_prob'],
         mutation_prob=args['mutation_prob'],
-        seed=args['seed']
+        seed=args['seed'],
+        constrained_analysis=args['constrained_analysis']
     ) 
