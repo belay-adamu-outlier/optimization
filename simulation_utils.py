@@ -327,18 +327,28 @@ def set_in_cache(
     max_overheating_hours,
     generation=None, 
     iteration=None, 
-    params=None
+    params=None,
+    max_living_room_overheating=None,
+    max_bedroom_overheating=None
 ):
 
     """Set a value in the shared cache with optional generation info and parameters."""
     if generation is not None or params is not None:
-        cache[key] = {
+        cache_entry = {
             'objectives': value,
             'max_overheating_hours': max_overheating_hours,
             'generation': generation,
             'iteration': iteration,
             'params': params
         }
+        
+        # Add CIBSE59 specific values if provided
+        if max_living_room_overheating is not None:
+            cache_entry['max_living_room_overheating'] = max_living_room_overheating
+        if max_bedroom_overheating is not None:
+            cache_entry['max_bedroom_overheating'] = max_bedroom_overheating
+            
+        cache[key] = cache_entry
     else:
         cache[key] = value
 
@@ -352,6 +362,7 @@ def get_from_cache(cache, key):
     if isinstance(cached_value, dict) and 'objectives' in cached_value:
         return cached_value['objectives'], cached_value['max_overheating_hours']
     else:
+        # For simple value storage (no generation/params), return the value and -1 for max_overheating
         return cached_value, -1
 
 def get_cache_entry(cache, key):

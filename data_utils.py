@@ -37,7 +37,8 @@ def print_optimization_table(
     solutions_by_key, 
     variable_names, 
     generation, 
-    constrained_analysis=False
+    constrained_analysis=False,
+    overheating_criterion='ASHRAE'
 ):
 
     """Print a formatted table of optimization results."""
@@ -82,11 +83,18 @@ def print_optimization_table(
                 name = name[:5] + "..."
             header_parts.append(f"{name:<{max_width}}")
     
-    header_parts.extend([
-        f"{'Mech_EUI':<8}",
-        f"{'Overheating':<8}",
-        f"{'Pareto_Opt':<10}" if not constrained_analysis else f"{'Max_Overheating':<8}"
-    ])
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        header_parts.extend([
+            f"{'Mech_EUI':<8}",
+            f"{'Max_LR_OH':<12}",
+            f"{'Max_BR_OH':<12}"
+        ])
+    else:
+        header_parts.extend([
+            f"{'Mech_EUI':<8}",
+            f"{'Overheating':<8}",
+            f"{'Pareto_Opt':<10}" if not constrained_analysis else f"{'Max_Overheating':<8}"
+        ])
     
     header = " ".join(header_parts)
     print(header)
@@ -145,11 +153,18 @@ def print_optimization_table(
                 else:
                     line_parts.append(f"{'':<8}")
         
-        line_parts.extend([
-            f"{result['mechanical_energy_use_intensity']:<8.3f}",
-            f"{result['average_overheating_hours']:<8.1f}",
-            f"{pareto_mark:<10} " if not constrained_analysis else f"{result['max_overheating_hours']:<8.1f}"
-        ])
+        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+            line_parts.extend([
+                f"{result['mechanical_energy_use_intensity']:<8.3f}",
+                f"{result.get('max_living_room_overheating', 0.0):<12.1f}",
+                f"{result.get('max_bedroom_overheating', 0.0):<12.1f}"
+            ])
+        else:
+            line_parts.extend([
+                f"{result['mechanical_energy_use_intensity']:<8.3f}",
+                f"{result['average_overheating_hours']:<8.1f}",
+                f"{pareto_mark:<10} " if not constrained_analysis else f"{result['max_overheating_hours']:<8.1f}"
+            ])
         
         line = " ".join(line_parts)
         print(line)
@@ -214,7 +229,7 @@ def update_pareto_optimality_for_display(solutions_by_key, all_objectives):
             solutions_by_key[key]['pareto_optimal'] = pareto_optimal[i]
 
 
-def initialize_csv(csv_filename, variable_names, metadata):
+def initialize_csv(csv_filename, variable_names, metadata, overheating_criterion='ASHRAE'):
     """Initialize the CSV file with headers and metadata."""
     with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
         # Write metadata section
@@ -234,7 +249,8 @@ def save_to_csv(
     solutions_by_key, 
     variable_names, 
     generation, 
-    constrained_analysis=False
+    constrained_analysis=False,
+    overheating_criterion='ASHRAE'
 ):
 
     """Save current generation results to CSV file."""
@@ -242,24 +258,41 @@ def save_to_csv(
         return
         
     with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
-        fieldnames = ['Generation', 'Iteration'] + variable_names + [
-            'Mechanical_Energy_Use_Intensity', 
-            'Average_Overheating_Hours', 
-            'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
-        ]
+        # Determine fieldnames based on overheating criterion
+        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+            fieldnames = ['Generation', 'Iteration'] + variable_names + [
+                'Mechanical_Energy_Use_Intensity', 
+                'Max_Living_Room_Overheating',
+                'Max_Bedroom_Overheating'
+            ]
+        else:
+            fieldnames = ['Generation', 'Iteration'] + variable_names + [
+                'Mechanical_Energy_Use_Intensity', 
+                'Average_Overheating_Hours', 
+                'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
+            ]
         
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         
         # Write all results from this generation
         for combination_key in solutions_by_generation[generation]:
             result = solutions_by_key[combination_key]
-            row = {
-                'Generation': result.get('generation') or 0,
-                'Iteration': result.get('iteration') or 0,
-                'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}" if not constrained_analysis else f"{result['max_overheating_hours']:.2f}",
-                ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): 'Pending' if not constrained_analysis else f"{result['max_overheating_hours']:.2f}"  # Will be updated at the end
-            }
+            if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+                row = {
+                    'Generation': result.get('generation') or 0,
+                    'Iteration': result.get('iteration') or 0,
+                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
+                    'Max_Living_Room_Overheating': f"{result.get('max_living_room_overheating', 0.0):.2f}",
+                    'Max_Bedroom_Overheating': f"{result.get('max_bedroom_overheating', 0.0):.2f}"
+                }
+            else:
+                row = {
+                    'Generation': result.get('generation') or 0,
+                    'Iteration': result.get('iteration') or 0,
+                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
+                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
+                    ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): 'Pending' if not constrained_analysis else f"{result['max_overheating_hours']:.2f}"  # Will be updated at the end
+                }
             
             # Add all variable values
             for var_name in variable_names:
@@ -276,7 +309,8 @@ def save_final_results(
     metadata, 
     ax, 
     fig, 
-    constrained_analysis=False
+    constrained_analysis=False,
+    overheating_criterion='ASHRAE'
 ):
     
     """Save final results with updated Pareto optimality."""
@@ -300,23 +334,40 @@ def save_final_results(
             csvfile.write(f"# {key}: {value}\n")
         csvfile.write("#\n")
         
-        fieldnames = ['Generation', 'Iteration'] + variable_names + [
-            'Mechanical_Energy_Use_Intensity', 
-            'Average_Overheating_Hours',
-            'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
-        ]
+        # Determine fieldnames based on overheating criterion
+        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+            fieldnames = ['Generation', 'Iteration'] + variable_names + [
+                'Mechanical_Energy_Use_Intensity', 
+                'Max_Living_Room_Overheating',
+                'Max_Bedroom_Overheating'
+            ]
+        else:
+            fieldnames = ['Generation', 'Iteration'] + variable_names + [
+                'Mechanical_Energy_Use_Intensity', 
+                'Average_Overheating_Hours',
+                'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
+            ]
         
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         
         for result in solutions_by_key.values():
-            row = {
-                'Generation': result.get('generation') or 0,
-                'Iteration': result.get('iteration') or 0,
-                'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): f"{result['max_overheating_hours']:.2f}" if constrained_analysis else ('Yes' if result['pareto_optimal'] else 'No')
-            }
+            if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+                row = {
+                    'Generation': result.get('generation') or 0,
+                    'Iteration': result.get('iteration') or 0,
+                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
+                    'Max_Living_Room_Overheating': f"{result.get('max_living_room_overheating', 0.0):.2f}",
+                    'Max_Bedroom_Overheating': f"{result.get('max_bedroom_overheating', 0.0):.2f}"
+                }
+            else:
+                row = {
+                    'Generation': result.get('generation') or 0,
+                    'Iteration': result.get('iteration') or 0,
+                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
+                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
+                    ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): f"{result['max_overheating_hours']:.2f}" if constrained_analysis else ('Yes' if result['pareto_optimal'] else 'No')
+                }
             
             # Add all variable values
             for var_name in variable_names:
@@ -337,21 +388,33 @@ def save_final_results(
         print("Pareto optimal solutions have been identified and marked in the CSV file.")
 
 
-def initialize_plot(constrained_analysis=False):
+def initialize_plot(constrained_analysis=False, overheating_criterion='ASHRAE'):
     """Initialize the live scatter plot."""
     try:
         plt.ion()  # Turn on interactive mode
         fig, ax = plt.subplots(figsize=(10, 8))
         ax.set_xlabel('Mechanical Energy Use Intensity (kWh/m²)')
-        ax.set_ylabel('Average Overheating Hours' if not constrained_analysis else 'Max Overheating Hours')
+        
+        # Set appropriate y-axis label based on criterion
+        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+            ax.set_ylabel('Max Living Room Overheating Hours')
+        elif constrained_analysis:
+            ax.set_ylabel('Max Overheating Hours')
+        else:
+            ax.set_ylabel('Average Overheating Hours')
+            
         ax.set_title('Optimization Progress - Pareto Front' if not constrained_analysis else 'Optimization Progress - Constrained Analysis')
         ax.grid(True, alpha=0.3)
 
         # Set default axis limits so axes are visible even with no data
         ax.set_xlim(0, 1)
         if constrained_analysis:
-            # For constrained analysis, allow negative values on y-axis
-            ax.set_ylim(-30, 10)
+            if overheating_criterion.upper() == 'CIBSE59':
+                # For CIBSE59, use more appropriate limits for overheating hours
+                ax.set_ylim(0, 50)  # 0-50 hours range
+            else:
+                # For ASHRAE, allow negative values on y-axis
+                ax.set_ylim(-30, 10)
         else:
             ax.set_ylim(0, 1)
 
@@ -384,7 +447,8 @@ def update_plot(
     ax, 
     scatter_all, 
     scatter_pareto, 
-    constrained_analysis=False
+    constrained_analysis=False,
+    overheating_criterion='ASHRAE'
 ):
     """Update the scatter plot with current data."""
     if not solutions_by_key or fig is None or ax is None:
@@ -394,7 +458,12 @@ def update_plot(
         # Extract data from solutions_by_key
         all_solutions = list(solutions_by_key.values())
         meui_values = [result['mechanical_energy_use_intensity'] for result in all_solutions]
-        overheating_values = [result['average_overheating_hours'] if not constrained_analysis else result['max_overheating_hours'] for result in all_solutions]
+        
+        # Choose appropriate overheating values based on criterion
+        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+            overheating_values = [result.get('max_living_room_overheating', 0.0) for result in all_solutions]
+        else:
+            overheating_values = [result['average_overheating_hours'] if not constrained_analysis else result['max_overheating_hours'] for result in all_solutions]
         
         if constrained_analysis:
             # For constrained analysis: plot all solutions as mechanical energy vs average overheating

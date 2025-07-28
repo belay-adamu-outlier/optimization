@@ -41,7 +41,8 @@ class EvaluationCallback(Callback):
         shared_cache=None, 
         debug_mode=False, 
         metadata=None,
-        constrained_analysis=False
+        constrained_analysis=False,
+        overheating_criterion='ASHRAE'
     ):
         super().__init__()
         self.optimization_variables = optimization_variables
@@ -50,6 +51,7 @@ class EvaluationCallback(Callback):
         self.metadata = metadata or {}
         self.generation = 0
         self.constrained_analysis = constrained_analysis
+        self.overheating_criterion = overheating_criterion
         # Use dictionaries for efficient lookups instead of lists
         self.solutions_by_key = {}  # combination_key -> solution_dict
         self.solutions_by_generation = {}  # generation -> list of combination_keys
@@ -60,10 +62,10 @@ class EvaluationCallback(Callback):
         
         # Initialize CSV file
         self.csv_filename = f"optimization_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        initialize_csv(self.csv_filename, self.variable_names, self.metadata)
+        initialize_csv(self.csv_filename, self.variable_names, self.metadata, self.overheating_criterion)
         
         # Initialize plotting
-        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot(self.constrained_analysis)
+        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot(self.constrained_analysis, self.overheating_criterion)
         
         # Track cache size for calculating new evaluations
         self.previous_cache_size = 0
@@ -113,6 +115,11 @@ class EvaluationCallback(Callback):
                     ('max_overheating_hours' if self.constrained_analysis else 'pareto_optimal'): max_overheating_hours if self.constrained_analysis else False
                 }
                 
+                # Add CIBSE59 specific values if available
+                if self.constrained_analysis and self.overheating_criterion.upper() == 'CIBSE59':
+                    solution_dict['max_living_room_overheating'] = cache_entry.get('max_living_room_overheating', 0.0)
+                    solution_dict['max_bedroom_overheating'] = cache_entry.get('max_bedroom_overheating', 0.0)
+                
                 # Add parameters (we need to reconstruct from key)
                 if params:
                     for var_name in self.variable_names:
@@ -144,7 +151,8 @@ class EvaluationCallback(Callback):
             self.solutions_by_key, 
             self.variable_names, 
             self.generation,
-            self.constrained_analysis
+            self.constrained_analysis,
+            self.overheating_criterion
         )
         
         # Save current generation results to CSV
@@ -153,7 +161,9 @@ class EvaluationCallback(Callback):
             self.solutions_by_generation, 
             self.solutions_by_key, 
             self.variable_names, 
-            self.generation
+            self.generation,
+            self.constrained_analysis,
+            self.overheating_criterion
         )
                 
         # Print efficiency info
@@ -169,7 +179,8 @@ class EvaluationCallback(Callback):
             self.generation, self.fig, 
             self.ax, self.scatter_all, 
             self.scatter_pareto,
-            self.constrained_analysis
+            self.constrained_analysis,
+            self.overheating_criterion
         )
 
         # Save cache at the end of each generation if in debug mode
@@ -184,7 +195,8 @@ class EvaluationCallback(Callback):
             self.variable_names, 
             self.metadata, self.ax, 
             self.fig,
-            self.constrained_analysis
+            self.constrained_analysis,
+            self.overheating_criterion
         )
 
 
@@ -195,7 +207,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         elementwise_runner=None, 
         shared_cache=None, 
         weather_file=None,
-        constrained_analysis=False
+        constrained_analysis=False,
+        overheating_criterion='ASHRAE'
     ):
         n_var = len(optimization_variables)
         
@@ -206,11 +219,20 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         xu = np.zeros(n_var, dtype=int)
         for i, (var_name, var_options) in enumerate(optimization_variables.items()):
             xu[i] = len(var_options) - 1
+        
+        # Determine number of constraints based on overheating criterion
+        if constrained_analysis:
+            if overheating_criterion.upper() == 'CIBSE59':
+                n_ieq_constr = 2  # max_living_room_overheating and max_bedroom_overheating
+            else:
+                n_ieq_constr = 1  # max_overheating_hours for ASHRAE
+        else:
+            n_ieq_constr = 0
             
         super().__init__(
             n_var=n_var,
             n_obj= 1 if constrained_analysis else 2,
-            n_ieq_constr= 1 if constrained_analysis else 0,
+            n_ieq_constr=n_ieq_constr,
             xl=xl,
             xu=xu,
             vtype=int,
@@ -222,6 +244,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
         self.current_generation = 0  # Track current generation
         self.constrained_analysis = constrained_analysis
+        self.overheating_criterion = overheating_criterion
 
     def set_generation(self, generation):
         """Set the current generation number for tracking purposes."""
@@ -241,17 +264,28 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 if cached_result is not None:
                     objective_values, max_overheating_hours = cached_result
                     out["F"] = objective_values if not self.constrained_analysis else [objective_values[0]]
-                    out["G"] = [max_overheating_hours - 30]
+                    if self.constrained_analysis:
+                        if self.overheating_criterion.upper() == 'CIBSE59':
+                            # For CIBSE59, we need to extract the specific constraint values from cache
+                            # The cache should contain max_living_room_overheating and max_bedroom_overheating
+                            cache_entry = self.shared_cache[combination_key]
+                            if isinstance(cache_entry, dict) and 'max_living_room_overheating' in cache_entry and 'max_bedroom_overheating' in cache_entry:
+                                max_living_room_overheating = cache_entry['max_living_room_overheating'] or 0.0
+                                max_bedroom_overheating = cache_entry['max_bedroom_overheating'] or 0.0
+                                out["G"] = [max_living_room_overheating - 120, max_bedroom_overheating - 32]
+                        else:
+                            # For ASHRAE, use max_overheating_hours
+                            out["G"] = [max_overheating_hours - 30]
                     return
             
             # This is a new combination - run simulation
             process_id = os.getpid()
             
-            # DUMMY SIMULATION CODE FOR TESTING - REMOVE COMMENTS AND DELETE THIS SECTION WHEN READY
+            # DUMMY SIMULATION CODE FOR TESTING - COMMENTED OUT FOR REAL SIMULATION
             # import random
             # import time
             # # Simulate some computation time
-            # time.sleep(0.1)
+            # time.sleep(0.01)  # Reduced for faster testing
             # # Generate dummy results based on parameters
             # # Convert all parameter values to numbers for calculation
             # param_values = []
@@ -263,12 +297,25 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             #         param_values.append(len(value))
             #     else:
             #         param_values.append(0)
-            
-            # meui = random.uniform(50, 200) + sum(param_values) * 10
-            # overheating = random.uniform(0, 100) + sum(param_values) * 5
-            # objective_values = [meui, overheating]
-            # max_overheating_hours = -1
-            # COMMENT OUT THE ABOVE DUMMY CODE AND UNCOMMENT BELOW FOR REAL SIMULATION
+            # 
+            # # Generate dummy results based on overheating criterion
+            # if self.overheating_criterion.upper() == 'CIBSE59':
+            #     # CIBSE59 dummy results
+            #     meui = random.uniform(50, 200) + sum(param_values) * 10
+            #     average_overheating = random.uniform(0, 50) + sum(param_values) * 2
+            #     max_living_room_overheating = random.uniform(20, 40) + sum(param_values) * 1
+            #     max_bedroom_overheating = random.uniform(15, 35) + sum(param_values) * 1
+            #     max_overheating_hours = max(max_living_room_overheating, max_bedroom_overheating)
+            # else:
+            #     # ASHRAE dummy results
+            #     meui = random.uniform(50, 200) + sum(param_values) * 10
+            #     average_overheating = random.uniform(0, 100) + sum(param_values) * 5
+            #     max_overheating_hours = random.uniform(0, 80) + sum(param_values) * 3
+            #     max_living_room_overheating = None
+            #     max_bedroom_overheating = None
+            # 
+            # objective_values = [meui, average_overheating]
+            # REAL SIMULATION CODE - UNCOMMENTED FOR ACTUAL ENERGYPLUS SIMULATIONS
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
             
@@ -281,37 +328,73 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 verbose='q'
             )
             
-            results = analyze_simulation_results(output_dir)
+            results = analyze_simulation_results(output_dir, overheating_criterion=self.overheating_criterion)
             
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
                 mechanical_energy_use_intensity = district_heating / 2590.29
-                max_overheating_hours = results['max_overheating_hours'] or 0.0
+                
+                # Handle different overheating criteria
+                if self.overheating_criterion.upper() == 'CIBSE59':
+                    max_living_room_overheating = results.get('max_living_room_overheating', 0.0) or 0.0
+                    max_bedroom_overheating = results.get('max_bedroom_overheating', 0.0) or 0.0
+                    max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
+                else:
+                    max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
+                    max_living_room_overheating = None
+                    max_bedroom_overheating = None
+                
                 objective_values = [mechanical_energy_use_intensity, average_overheating]
             else:
                 objective_values = [1000.0, 1000.0]
+                if self.overheating_criterion.upper() == 'CIBSE59':
+                    max_living_room_overheating = 1000.0
+                    max_bedroom_overheating = 1000.0
+                    max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
+                else:
+                    max_overheating_hours = 1000.0
+                    max_living_room_overheating = None
+                    max_bedroom_overheating = None
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
-            
-            # UNCMMENT UPTO HERE FOR REAL SIMULATION
             
             # Store results in shared cache
             if self.shared_cache is not None:
-                set_in_cache(
-                    self.shared_cache, 
-                    combination_key, 
-                    objective_values, 
-                    max_overheating_hours, 
-                    generation=self.current_generation,
-                    params=params
-                )
+                if self.overheating_criterion.upper() == 'CIBSE59':
+                    set_in_cache(
+                        self.shared_cache, 
+                        combination_key, 
+                        objective_values, 
+                        max_overheating_hours, 
+                        generation=self.current_generation,
+                        params=params,
+                        max_living_room_overheating=max_living_room_overheating,
+                        max_bedroom_overheating=max_bedroom_overheating
+                    )
+                else:
+                    set_in_cache(
+                        self.shared_cache, 
+                        combination_key, 
+                        objective_values, 
+                        max_overheating_hours, 
+                        generation=self.current_generation,
+                        params=params
+                    )
             
             out["F"] = objective_values if not self.constrained_analysis else [objective_values[0]]
-            out["G"] = [max_overheating_hours - 30]
+            if self.constrained_analysis:
+                if self.overheating_criterion.upper() == 'CIBSE59':
+                    out["G"] = [max_living_room_overheating - 120, max_bedroom_overheating - 32]
+                else:
+                    out["G"] = [max_overheating_hours - 30]
             
         except Exception as e:
             out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
-            out["G"] = [1000.0]
+            if self.constrained_analysis:
+                if self.overheating_criterion.upper() == 'CIBSE59':
+                    out["G"] = [1000.0, 1000.0]  # Two constraints for CIBSE59
+                else:
+                    out["G"] = [1000.0]  # One constraint for ASHRAE
             print(f"Error evaluating individual: {str(e)}")
 
 
@@ -323,7 +406,8 @@ def main(
     crossover_prob=None, 
     mutation_prob=None, 
     seed=None,
-    constrained_analysis=False
+    constrained_analysis=False,
+    overheating_criterion='ASHRAE'
 ):
     # Print optimization header
     print_optimization_header()
@@ -365,7 +449,8 @@ def main(
         elementwise_runner=runner, 
         shared_cache=shared_cache,
         weather_file=weather_file,
-        constrained_analysis=constrained_analysis
+        constrained_analysis=constrained_analysis,
+        overheating_criterion=overheating_criterion
     )
     
     # Generate seed if not provided
@@ -388,7 +473,8 @@ def main(
         'Number_of_Workers': num_workers,
         'Debug_Mode': debug_mode,
         'Seed': seed,
-        'Constrained_Analysis': constrained_analysis
+        'Constrained_Analysis': constrained_analysis,
+        'Overheating_Criterion': overheating_criterion
     }
     
     # Print optimization parameters
@@ -411,7 +497,8 @@ def main(
         shared_cache=shared_cache, 
         debug_mode=debug_mode, 
         metadata=metadata,
-        constrained_analysis=constrained_analysis
+        constrained_analysis=constrained_analysis,
+        overheating_criterion=overheating_criterion
     )
     
     # Define algorithm with built-in duplicate elimination and seeding
@@ -475,5 +562,6 @@ if __name__ == "__main__":
         crossover_prob=args['crossover_prob'],
         mutation_prob=args['mutation_prob'],
         seed=args['seed'],
-        constrained_analysis=args['constrained_analysis']
+        constrained_analysis=args['constrained_analysis'],
+        overheating_criterion=args['overheating_criterion']
     ) 

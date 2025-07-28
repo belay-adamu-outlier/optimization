@@ -25,6 +25,12 @@ def get_interactive_arguments():
     constrained_analysis = _get_boolean_input("Enable constrained analysis", False, "constrained analysis")
     print(f"Constrained analysis: {'Enabled' if constrained_analysis else 'Disabled'}\n")
     
+    # Overheating criterion (only if constrained analysis is enabled)
+    overheating_criterion = 'ASHRAE'  # Default
+    if constrained_analysis:
+        overheating_criterion = _get_overheating_criterion_choice()
+        print(f"Overheating criterion: {overheating_criterion}\n")
+    
     # Number of generations
     generations = _get_numeric_input("Enter number of generations", 100, "generations")
     print(f"Number of generations: {generations}\n")
@@ -50,11 +56,12 @@ def get_interactive_arguments():
     print(f"Random seed: {seed if seed is not None else 'Auto-generated'}\n")
     
     # Summary and confirmation
-    _print_summary_and_confirm(weather_file, constrained_analysis, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed)
+    _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed)
     
     return {
         'weather': weather_file,
         'constrained_analysis': constrained_analysis,
+        'overheating_criterion': overheating_criterion,
         'generations': generations,
         'population_size': population_size,
         'crossover_prob': crossover_prob,
@@ -86,6 +93,23 @@ def _get_weather_file_choice():
     else:
         print("Invalid choice, using default: Vancouver - 2021 AMY.epw")
         return "Vancouver - 2021 AMY.epw"
+
+
+def _get_overheating_criterion_choice():
+    """Get overheating criterion choice from user."""
+    print("Overheating criterion options:")
+    print("1. ASHRAE 55 Adaptive 80% (default)")
+    print("2. CIBSE59")
+    
+    choice = input("Enter choice (1-2) or press Enter for default value of 1: ").strip()
+    
+    if choice == "1" or choice == "":
+        return "ASHRAE"
+    elif choice == "2":
+        return "CIBSE59"
+    else:
+        print("Invalid choice, using default: ASHRAE")
+        return "ASHRAE"
 
 
 def _get_numeric_input(prompt, default_value, param_name):
@@ -153,13 +177,15 @@ def _get_seed_input():
         return None
 
 
-def _print_summary_and_confirm(weather_file, constrained_analysis, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed):
+def _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed):
     """Print parameter summary and get user confirmation."""
     print("=" * 60)
     print("OPTIMIZATION PARAMETERS SUMMARY")
     print("=" * 60)
     print(f"Weather File: {weather_file}")
     print(f"Constrained Analysis: {'Enabled' if constrained_analysis else 'Disabled'}")
+    if constrained_analysis:
+        print(f"Overheating Criterion: {overheating_criterion}")
     print(f"Number of Generations: {generations}")
     print(f"Population Size: {population_size}")
     print(f"Crossover Probability: {crossover_prob}")
