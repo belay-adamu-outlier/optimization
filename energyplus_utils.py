@@ -11,7 +11,7 @@ import shutil
 from datetime import datetime
 from eppy.modeleditor import IDF
 from simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
-from overheating_analysis import analyze_overheating
+from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
 
 
@@ -365,13 +365,14 @@ def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, o
         gc.collect()
 
 
-def analyze_simulation_results(output_dir, cleanup=True):
+def analyze_simulation_results(output_dir, cleanup=True, overheating_criterion='ASHRAE'):
     """
     Analyze simulation results from a completed EnergyPlus simulation.
     
     Args:
         output_dir (str): Path to the simulation output directory
         cleanup (bool): Whether to delete the output directory after analysis (default: True)
+        overheating_criterion (str): Criterion for overheating analysis ('ASHRAE' or 'CIBSE59', default: 'ASHRAE')
     
     Returns:
         dict: Dictionary containing simulation results, district heating, and overheating analysis
@@ -390,24 +391,49 @@ def analyze_simulation_results(output_dir, cleanup=True):
             temperature_data, timestamps, variable_mapping = parse_eso_file(eso_file_path)
             zone_temperatures = extract_zone_temperatures(temperature_data, timestamps)
             
-            # Perform overheating analysis
-            overheating_results = analyze_overheating(zone_temperatures)
+            # Perform overheating analysis based on criterion
+            if overheating_criterion.upper() == 'CIBSE59':
+                overheating_results = analyze_overheating_with_CIBSE59(zone_temperatures)
+            else:
+                overheating_results = analyze_overheating_with_ASHRAE(zone_temperatures)
             
             # Print overheating analysis results
             # print_overheating_analysis_results(overheating_results)
             
             average_overheating = overheating_results['average_overheating_hours']
             
-            # Calculate max_overheating_hours by finding the maximum across all zones
+            # Calculate overheating metrics based on criterion
             max_overheating_hours = 0.0
+            max_living_room_overheating = 0.0
+            max_bedroom_overheating = 0.0
+            
             if overheating_results['zone_results']:
-                max_overheating_hours = max(
-                    zone_data['overheating_hours'] 
-                    for zone_data in overheating_results['zone_results'].values()
-                )
+                if overheating_criterion.upper() == 'CIBSE59':
+                    # For CIBSE59, calculate separate maximums for living rooms and bedrooms
+                    living_room_overheating = []
+                    bedroom_overheating = []
+                    
+                    for zone_name, zone_data in overheating_results['zone_results'].items():
+                        if zone_data.get('zone_type') == 'bedroom':
+                            bedroom_overheating.append(zone_data['overheating_hours'])
+                        else:  # living_room/kitchen
+                            living_room_overheating.append(zone_data['overheating_hours'])
+                    
+                    if living_room_overheating:
+                        max_living_room_overheating = max(living_room_overheating)
+                    if bedroom_overheating:
+                        max_bedroom_overheating = max(bedroom_overheating)
+                else:
+                    # For ASHRAE, calculate overall maximum across all zones
+                    max_overheating_hours = max(
+                        zone_data['overheating_hours'] 
+                        for zone_data in overheating_results['zone_results'].values()
+                    )
         else:
             average_overheating = None
             max_overheating_hours = None
+            max_living_room_overheating = None
+            max_bedroom_overheating = None
             overheating_results = None
         
         results = {
@@ -415,9 +441,17 @@ def analyze_simulation_results(output_dir, cleanup=True):
             'output_directory': output_dir,
             'district_heating_kwh': district_heating,
             'average_overheating_hours': average_overheating,
-            'max_overheating_hours': max_overheating_hours,
-            'overheating_results': overheating_results
+            'overheating_results': overheating_results,
+            'overheating_criterion': overheating_criterion
         }
+        
+        # Add criterion-specific results
+        if overheating_criterion.upper() == 'CIBSE59':
+            results['max_living_room_overheating'] = max_living_room_overheating
+            results['max_bedroom_overheating'] = max_bedroom_overheating
+        else:
+            # For ASHRAE, include overall maximum overheating hours
+            results['max_overheating_hours'] = max_overheating_hours
         
         # Clean up output directory if requested
         if cleanup and os.path.exists(output_dir):
@@ -469,7 +503,8 @@ def analyze_simulation_results(output_dir, cleanup=True):
             'district_heating_kwh': None,
             'average_overheating_hours': None,
             'max_overheating_hours': None,
-            'overheating_results': None
+            'overheating_results': None,
+            'overheating_criterion': overheating_criterion
         }
 
 

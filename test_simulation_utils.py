@@ -211,7 +211,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         key = make_cache_key(params)
         value = [100.0, 50.0]
         
-        set_in_cache(cache, key, value)
+        set_in_cache(cache, key, value, max_overheating_hours=0.0)
         
         self.assertIn(key, cache)
         self.assertEqual(cache[key], value)
@@ -224,15 +224,15 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation, params)
+        set_in_cache(cache, key, value, max_overheating_hours=0.0, generation=generation, params=params)
         
         self.assertIn(key, cache)
         cached_entry = cache[key]
         self.assertIsInstance(cached_entry, dict)
         self.assertEqual(cached_entry['objectives'], value)
         self.assertEqual(cached_entry['generation'], generation)
-        # Updated: params is now expected to be None
-        self.assertIsNone(cached_entry['params'])
+        # Params should be stored when provided
+        self.assertEqual(cached_entry['params'], params)
     
     def test_get_from_cache_basic(self):
         """Test basic cache retrieval."""
@@ -241,10 +241,11 @@ class TestSharedCacheFunctions(unittest.TestCase):
         key = make_cache_key(params)
         value = [100.0, 50.0]
         
-        set_in_cache(cache, key, value)
-        retrieved = get_from_cache(cache, key)
+        set_in_cache(cache, key, value, max_overheating_hours=0.0)
+        retrieved, max_overheating = get_from_cache(cache, key)
         
         self.assertEqual(retrieved, value)
+        self.assertEqual(max_overheating, -1)  # Simple storage returns -1 for max_overheating
     
     def test_get_from_cache_with_generation(self):
         """Test cache retrieval with generation info."""
@@ -254,10 +255,11 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation, params)
-        retrieved = get_from_cache(cache, key)
+        set_in_cache(cache, key, value, max_overheating_hours=0.0, generation=generation, params=params)
+        retrieved, max_overheating = get_from_cache(cache, key)
         
         self.assertEqual(retrieved, value)
+        self.assertEqual(max_overheating, 0.0)
     
     def test_get_from_cache_not_found(self):
         """Test cache retrieval for non-existent key."""
@@ -274,14 +276,14 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation, params)
+        set_in_cache(cache, key, value, max_overheating_hours=0.0, generation=generation, params=params)
         entry = get_cache_entry(cache, key)
         
         self.assertIsInstance(entry, dict)
         self.assertEqual(entry['objectives'], value)
         self.assertEqual(entry['generation'], generation)
-        # Updated: params is now expected to be None
-        self.assertIsNone(entry['params'])
+        # Params should be stored when provided
+        self.assertEqual(entry['params'], params)
     
     def test_get_generation_from_cache(self):
         """Test getting generation from cache."""
@@ -291,7 +293,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         value = [100.0, 50.0]
         generation = 5
         
-        set_in_cache(cache, key, value, generation, params)
+        set_in_cache(cache, key, value, max_overheating_hours=0.0, generation=generation, params=params)
         retrieved_generation = get_generation_from_cache(cache, key)
         
         self.assertEqual(retrieved_generation, generation)
@@ -303,7 +305,7 @@ class TestSharedCacheFunctions(unittest.TestCase):
         key = make_cache_key(params)
         value = [100.0, 50.0]
         
-        set_in_cache(cache, key, value)  # No generation
+        set_in_cache(cache, key, value, max_overheating_hours=0.0)  # No generation
         retrieved_generation = get_generation_from_cache(cache, key)
         
         self.assertIsNone(retrieved_generation)
@@ -323,8 +325,8 @@ class TestSharedCacheFunctions(unittest.TestCase):
         key1 = make_cache_key(params1)
         key2 = make_cache_key(params2)
         
-        set_in_cache(cache, key1, [100.0, 50.0], 1)
-        set_in_cache(cache, key2, [200.0, 75.0], 2)
+        set_in_cache(cache, key1, [100.0, 50.0], 1, generation=1, params=params1)
+        set_in_cache(cache, key2, [200.0, 75.0], 2, generation=1, params=params2)
         
         # Mock file operations to avoid actual file creation
         with patch('os.makedirs') as mock_makedirs, \
@@ -379,8 +381,8 @@ class TestSharedCacheFunctions(unittest.TestCase):
         key1 = make_cache_key(params1)
         key2 = make_cache_key(params2)
         
-        set_in_cache(cache, key1, [100.0, 50.0], 1)
-        set_in_cache(cache, key2, [200.0, 75.0], 2)
+        set_in_cache(cache, key1, [100.0, 50.0], 1, generation=1, params=params1)
+        set_in_cache(cache, key2, [200.0, 75.0], 2, generation=1, params=params2)
         
         # Mock existing cache file content
         existing_cache_content = json.dumps({
