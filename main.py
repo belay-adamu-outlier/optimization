@@ -272,7 +272,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                             if isinstance(cache_entry, dict) and 'max_living_room_overheating' in cache_entry and 'max_bedroom_overheating' in cache_entry:
                                 max_living_room_overheating = cache_entry['max_living_room_overheating'] or 0.0
                                 max_bedroom_overheating = cache_entry['max_bedroom_overheating'] or 0.0
-                                out["G"] = [max_living_room_overheating - 120, max_bedroom_overheating - 32]
+                                out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32]
                         else:
                             # For ASHRAE, use max_overheating_hours
                             out["G"] = [max_overheating_hours - 30]

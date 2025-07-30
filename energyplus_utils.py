@@ -193,11 +193,11 @@ def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
         if 45 <= azimuth < 135:
             wwr = wwr_east
         elif 135 <= azimuth < 225:
-            wwr = wwr_south
+            wwr = wwr_north
         elif 225 <= azimuth < 315:
             wwr = wwr_west
         else:
-            wwr = wwr_north
+            wwr = wwr_south
         
         # Calculate wall area (assume rectangle)
         v0, v1, v2, v3 = wall_vertices
@@ -292,15 +292,20 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
     
     # Save the modified IDF file if requested
     if save:
-        if save_path is None:
-            # Use the original path if no save_path provided
-            save_path = idf.idfname
+        save_path = save_path or idf.idfname
         idf.save(save_path)
     
     return idf
 
 
-def run_simulation(idf_path, weather_path, envelope_parameters, idd_path=None, output_dir=None, verbose='v'):
+def run_simulation(
+    idf_path, 
+    weather_path, 
+    envelope_parameters, 
+    idd_path=None, 
+    output_dir=None, 
+    verbose='v'
+):
     """
     Run EnergyPlus simulation with envelope parameter modifications.
     

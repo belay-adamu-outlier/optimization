@@ -296,14 +296,18 @@ def analyze_overheating_with_CIBSE59(temp_data: Dict[str, pd.DataFrame],
         is_living_room = zone_name.endswith('LR') or zone_name.endswith(':LR')
         
         if is_bedroom:
-            # Criterion 2: Bedrooms - check if temperature exceeds 26°C during sleeping hours (10pm-7am)
+            # Criterion 2: Bedrooms - check if temperature exceeds 26°C during sleeping hours (10pm-6am, excluding hour 7)
             sleeping_hours = summer_zone[
-                (summer_zone['hour'] >= 22) | (summer_zone['hour'] <= 7)
+                (summer_zone['hour'] >= 22) | (summer_zone['hour'] <= 6)
             ]
             
             if len(sleeping_hours) > 0:
-                # Count hours where temperature exceeds or equals 26°C during sleeping hours
-                overheating_hours = (sleeping_hours['temperature'] >= CIBSE59_BEDROOM_THRESHOLD).sum()
+                # Calculate rounded difference between room temperature and threshold (26°C)
+                temp_diff = sleeping_hours['temperature'] - CIBSE59_BEDROOM_THRESHOLD
+                temp_diff_rounded = temp_diff.round()
+                
+                # Count hours where rounded temperature difference is >= 0 (i.e., room temp >= 26°C)
+                overheating_hours = (temp_diff_rounded > 0).sum()
         else:
             # Criterion 1: Living rooms/kitchens - check if temperature difference exceeds 1K
             # Calculate threshold: Tmax = 0.33 × Trm + 21.8
@@ -322,7 +326,7 @@ def analyze_overheating_with_CIBSE59(temp_data: Dict[str, pd.DataFrame],
             temp_diff_rounded = temp_diff.round()
             
             # Count hours where temperature difference exceeds 1K
-            overheating_hours = (temp_diff_rounded >= CIBSE59_EXCEEDANCE_THRESHOLD).sum()
+            overheating_hours = (temp_diff_rounded > CIBSE59_EXCEEDANCE_THRESHOLD).sum()
         
         zone_results[zone_name] = {
             'overheating_hours': overheating_hours,
