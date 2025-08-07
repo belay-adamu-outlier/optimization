@@ -16,7 +16,7 @@ import pandas as pd
 from datetime import datetime
 from unittest.mock import patch, mock_open
 # Import the functions to test
-from simulation_utils import (
+from .simulation_utils import (
     extract_zone_temperatures,
     extract_district_heating_from_htm,
     create_shared_cache,

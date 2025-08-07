@@ -10,9 +10,219 @@ import gc
 import shutil
 from datetime import datetime
 from eppy.modeleditor import IDF
-from simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
+from .simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
 from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
+
+
+def apply_shading_schedules_to_idf(idf, transmittance_list):
+    """
+    Apply shading schedules to an IDF object based on transmittance values.
+    
+    Args:
+        idf: IDF object
+        transmittance_list (list): List of 144 transmittance values (0 or 1) organized as:
+            - 6 shading elements: south_overhang, south_fin, west_overhang, west_fin, east_overhang, east_fin
+            - 4 seasons: Spring (Mar-May), Summer (Jun-Aug), Fall (Sep-Nov), Winter (Dec-Feb)
+            - 6 time periods per day: 6am-8am, 8am-10am, 10am-12pm, 12pm-2pm, 2pm-4pm, 4pm-6am (next day)
+            - Total: 6 × 4 × 6 = 144 values
+    
+    Returns:
+        IDF: The modified IDF object with shading schedules applied
+    """
+    if len(transmittance_list) != 144:
+        raise ValueError(f"Expected 144 transmittance values, got {len(transmittance_list)}")
+    
+    # Define shading element names
+    shading_elements = [
+        'south_overhang',
+        'south_fin', 
+        'west_overhang',
+        'west_fin',
+        'east_overhang',
+        'east_fin'
+    ]
+    
+    # Define seasons with their date ranges (astronomical seasons)
+    # Note: "Until: 21 Mar" means up to but not including March 21st
+    seasons = [
+        ('Spring', '21 Mar', '21 Jun'),    # Spring: Dec 21 - Mar 21 (split across year)
+        ('Summer', '21 Jun', '21 Sep'),    # Summer: Mar 21 - Jun 21
+        ('Fall', '21 Sep', '21 Dec'),      # Fall: Jun 21 - Sep 21
+        ('Winter', '21 Dec', '21 Mar')     # Winter: Sep 21 - Dec 21
+    ]
+    
+    # Define time periods (8 periods per day to cover full 24 hours)
+    # Each day starts with 06:00, 0 and ends with 24:00, 0
+    time_periods = [
+        ('24:00', '06:00'),  # midnight to 6am next day (0) - START
+        ('06:00', '08:00'),
+        ('08:00', '10:00'), 
+        ('10:00', '12:00'),
+        ('12:00', '14:00'),
+        ('14:00', '16:00'),
+        ('16:00', '18:00'),  # 4pm to 6pm (last shading value)
+        ('18:00', '24:00')   # 6pm to midnight (0) - END
+    ]
+    
+    # Process each shading element
+    for shade_idx, shade_name in enumerate(shading_elements):
+        schedule_name = f"{shade_name.replace('_', ' ').title()} Shading Schedule"
+        
+        # Remove existing schedule with the same name if it exists
+        existing_schedules = [s for s in idf.idfobjects['SCHEDULE:COMPACT'] if s.Name == schedule_name]
+        for existing_schedule in existing_schedules:
+            idf.removeidfobject(existing_schedule)
+        
+        # Create new schedule object
+        schedule = idf.newidfobject('SCHEDULE:COMPACT')
+        schedule.Name = schedule_name
+        schedule.Schedule_Type_Limits_Name = 'Fraction'
+        
+        # Build schedule fields
+        schedule_fields = []
+        
+        # Process each season in the correct order
+        # Spring part 1: Dec 21 - Mar 21
+        spring_values = []
+        for period_idx in range(6):  # 6 time periods per day
+            list_idx = (shade_idx * 24) + (0 * 6) + period_idx  # Spring is season 0
+            spring_values.append(transmittance_list[list_idx])
+        
+        schedule_fields.extend([
+            'Through: 21 Mar',
+            'For: AllDays'
+        ])
+        
+        # Add all time periods for Spring part 1
+        for period_idx, (start_time, end_time) in enumerate(time_periods):
+            if period_idx == 0:
+                # For the 1st period (24:00-06:00), use 0 (retracted)
+                transmittance_value = 0
+            elif period_idx < 6:
+                # Use the original transmittance value for periods 1-5 (06:00-16:00)
+                transmittance_value = spring_values[period_idx - 1]
+            elif period_idx == 6:
+                # For the 7th period (16:00-18:00), use the last shading value
+                transmittance_value = spring_values[5]  # Last shading value
+            else:
+                # For the 8th period (18:00-24:00), use 0 (retracted)
+                transmittance_value = 0
+            
+            schedule_fields.extend([
+                f'Until: {end_time}',
+                str(transmittance_value)
+            ])
+        
+        # Summer: Mar 21 - Jun 21
+        summer_values = []
+        for period_idx in range(6):  # 6 time periods per day
+            list_idx = (shade_idx * 24) + (1 * 6) + period_idx  # Summer is season 1
+            summer_values.append(transmittance_list[list_idx])
+        
+        schedule_fields.extend([
+            'Through: 21 Jun',
+            'For: AllDays'
+        ])
+        
+        # Add all time periods for Summer
+        for period_idx, (start_time, end_time) in enumerate(time_periods):
+            if period_idx == 0:
+                transmittance_value = 0
+            elif period_idx < 6:
+                transmittance_value = summer_values[period_idx - 1]
+            elif period_idx == 6:
+                transmittance_value = summer_values[5]
+            else:
+                transmittance_value = 0
+            
+            schedule_fields.extend([
+                f'Until: {end_time}',
+                str(transmittance_value)
+            ])
+        
+        # Fall: Jun 21 - Sep 21
+        fall_values = []
+        for period_idx in range(6):  # 6 time periods per day
+            list_idx = (shade_idx * 24) + (2 * 6) + period_idx  # Fall is season 2
+            fall_values.append(transmittance_list[list_idx])
+        
+        schedule_fields.extend([
+            'Through: 21 Sep',
+            'For: AllDays'
+        ])
+        
+        # Add all time periods for Fall
+        for period_idx, (start_time, end_time) in enumerate(time_periods):
+            if period_idx == 0:
+                transmittance_value = 0
+            elif period_idx < 6:
+                transmittance_value = fall_values[period_idx - 1]
+            elif period_idx == 6:
+                transmittance_value = fall_values[5]
+            else:
+                transmittance_value = 0
+            
+            schedule_fields.extend([
+                f'Until: {end_time}',
+                str(transmittance_value)
+            ])
+        
+        # Winter: Sep 21 - Dec 21
+        winter_values = []
+        for period_idx in range(6):  # 6 time periods per day
+            list_idx = (shade_idx * 24) + (3 * 6) + period_idx  # Winter is season 3
+            winter_values.append(transmittance_list[list_idx])
+        
+        schedule_fields.extend([
+            'Through: 21 Dec',
+            'For: AllDays'
+        ])
+        
+        # Add all time periods for Winter
+        for period_idx, (start_time, end_time) in enumerate(time_periods):
+            if period_idx == 0:
+                transmittance_value = 0
+            elif period_idx < 6:
+                transmittance_value = winter_values[period_idx - 1]
+            elif period_idx == 6:
+                transmittance_value = winter_values[5]
+            else:
+                transmittance_value = 0
+            
+            schedule_fields.extend([
+                f'Until: {end_time}',
+                str(transmittance_value)
+            ])
+        
+        # Spring part 2: Dec 21 - Dec 31 (at the very end)
+        schedule_fields.extend([
+            'Through: 31 Dec',
+            'For: AllDays'
+        ])
+        
+        # Add all time periods for Spring part 2 (same values as part 1)
+        for period_idx, (start_time, end_time) in enumerate(time_periods):
+            if period_idx == 0:
+                transmittance_value = 0
+            elif period_idx < 6:
+                transmittance_value = spring_values[period_idx - 1]
+            elif period_idx == 6:
+                transmittance_value = spring_values[5]
+            else:
+                transmittance_value = 0
+            
+            schedule_fields.extend([
+                f'Until: {end_time}',
+                str(transmittance_value)
+            ])
+        
+        # Set the schedule fields
+        if schedule_fields:
+            for i, field_value in enumerate(schedule_fields, 1):
+                setattr(schedule, f'Field_{i}', field_value)
+    
+    return idf
 
 
 def apply_construction_to_surfaces(idf, construction_name, surface_type):
@@ -594,4 +804,4 @@ if __name__ == "__main__":
     results = analyze_simulation_results(output_dir)
     
     # Print summary
-    print_simulation_summary(results) 
+    print_simulation_summary(results)

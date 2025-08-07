@@ -9,7 +9,7 @@ import numpy as np
 from unittest.mock import Mock, MagicMock, patch
 import tempfile
 import os
-from energyplus_utils import (
+from .energyplus_utils import (
     apply_construction_to_surfaces,
     apply_infiltration_to_zones,
     calculate_window_geometry,

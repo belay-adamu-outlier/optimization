@@ -11,16 +11,16 @@ from pymoo.optimize import minimize
 from pymoo.core.callback import Callback
 import os
 import matplotlib.pyplot as plt
-from energyplus_utils import run_simulation, analyze_simulation_results
-from simulation_utils import (
+from util.energyplus_utils import run_simulation, analyze_simulation_results
+from util.simulation_utils import (
     create_shared_cache,
     make_cache_key,
     get_from_cache,
     set_in_cache,
     save_cache_to_file
 )
-from cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer
-from data_utils import (
+from util.cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer
+from util.data_utils import (
     x_to_params,
     print_optimization_table,
     update_pareto_optimality_for_display,
