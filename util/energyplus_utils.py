@@ -43,15 +43,6 @@ def apply_shading_schedules_to_idf(idf, transmittance_list):
         'east_fin'
     ]
     
-    # Define seasons with their date ranges (astronomical seasons)
-    # Note: "Until: 21 Mar" means up to but not including March 21st
-    seasons = [
-        ('Spring', '21 Mar', '21 Jun'),    # Spring: Dec 21 - Mar 21 (split across year)
-        ('Summer', '21 Jun', '21 Sep'),    # Summer: Mar 21 - Jun 21
-        ('Fall', '21 Sep', '21 Dec'),      # Fall: Jun 21 - Sep 21
-        ('Winter', '21 Dec', '21 Mar')     # Winter: Sep 21 - Dec 21
-    ]
-    
     # Define time periods (8 periods per day to cover full 24 hours)
     # Each day starts with 06:00, 0 and ends with 24:00, 0
     time_periods = [
@@ -463,6 +454,7 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
             - 'wwr_west': Window-to-wall ratio for west facade
             - 'wwr_north': Window-to-wall ratio for north facade
             - 'wwr_south': Window-to-wall ratio for south facade
+            - 'shading_schedule': 144-long list (6 elements × 4 seasons × 6 periods)
         save (bool): Whether to save the modified IDF file
         save_path (str, optional): Path to save the modified IDF file. If None, uses original path
     
@@ -499,6 +491,10 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
             "Bitumen felt/sheet_.19": envelope_parameters['roof_solar_absorptance'],
             "Bitumen felt/sheet_.003": envelope_parameters['roof_solar_absorptance']
         })
+    
+    # Apply shading schedules
+    if 'shading_schedule' in envelope_parameters:
+        idf = apply_shading_schedules_to_idf(idf, envelope_parameters['shading_schedule'])
     
     # Save the modified IDF file if requested
     if save:
@@ -681,13 +677,13 @@ def analyze_simulation_results(output_dir, cleanup=True, overheating_criterion='
                         # Only remove if directory is empty
                         if not os.listdir(multi_run_dir):
                             os.rmdir(multi_run_dir)
-                    except Exception as rmdir_error:
+                    except Exception:
                         # It's okay if we can't remove the multi_run directory
                         pass
                         
             except Exception as cleanup_error:
                 # Log cleanup error but don't fail the analysis
-                print(f"Warning: Failed to clean up output directory {output_dir}: {cleanup_error}")
+                print("Warning: Failed to clean up output directory %s: %s" % (output_dir, cleanup_error))
         
         return results
         
@@ -704,12 +700,12 @@ def analyze_simulation_results(output_dir, cleanup=True, overheating_criterion='
                         # Only remove if directory is empty
                         if not os.listdir(multi_run_dir):
                             os.rmdir(multi_run_dir)
-                    except Exception as rmdir_error:
+                    except Exception:
                         # It's okay if we can't remove the multi_run directory
                         pass
-                        
+                    
             except Exception as cleanup_error:
-                print(f"Warning: Failed to clean up output directory {output_dir}: {cleanup_error}")
+                print("Warning: Failed to clean up output directory %s: %s" % (output_dir, cleanup_error))
         
         return {
             'success': False,
@@ -763,20 +759,20 @@ def print_simulation_summary(results):
     print("="*60)
     
     if results['success']:
-        print(f"✓ Simulation completed successfully")
-        print(f"📁 Output directory: {results['output_directory']}")
+        print("✓ Simulation completed successfully")
+        print("📁 Output directory: %s" % results['output_directory'])
         
         if results['district_heating_kwh'] is not None:
-            print(f"🔥 District Heating: {results['district_heating_kwh']:.2f} kWh")
+            print("🔥 District Heating: %.2f kWh" % results['district_heating_kwh'])
         else:
             print("❌ District Heating: Not available")
             
         if results['average_overheating_hours'] is not None:
-            print(f"🌡️  Average Overheating: {results['average_overheating_hours']:.1f} hours")
+            print("🌡️  Average Overheating: %.1f hours" % results['average_overheating_hours'])
         else:
             print("❌ Average Overheating: Not available")
     else:
-        print(f"❌ Simulation failed: {results.get('error', 'Unknown error')}")
+        print("❌ Simulation failed: %s" % results.get('error', 'Unknown error'))
 
 
 # Example usage with files in current directory
