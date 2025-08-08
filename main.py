@@ -30,7 +30,10 @@ from util.data_utils import (
     initialize_plot,
     update_plot,
     load_optimization_variables,
-    load_config
+    load_config,
+    print_generation_summary,
+    print_optimization_parameters,
+    print_final_results
 )
 
 
@@ -62,7 +65,14 @@ class EvaluationCallback(Callback):
         
         # Initialize CSV file
         self.csv_filename = f"optimization_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        initialize_csv(self.csv_filename, self.variable_names, self.metadata, self.overheating_criterion)
+        initialize_csv(
+            self.csv_filename,
+            self.metadata,
+            variable_names=self.variable_names,
+            problem_type='envelope',
+            constrained_analysis=self.constrained_analysis,
+            overheating_criterion=self.overheating_criterion
+        )
         
         # Initialize plotting
         self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot(self.constrained_analysis, self.overheating_criterion)
@@ -162,16 +172,19 @@ class EvaluationCallback(Callback):
             self.solutions_by_key, 
             self.variable_names, 
             self.generation,
-            self.constrained_analysis,
-            self.overheating_criterion
+            problem_type='envelope',
+            constrained_analysis=self.constrained_analysis,
+            overheating_criterion=self.overheating_criterion
         )
                 
         # Print efficiency info
-        print(f"\nGeneration {self.generation} Summary:")
-        print(f"  Total individuals in generation: {total_evaluations_in_generation}")
-        print(f"  New unique evaluations: {new_evaluations}")
-        print(f"  Duplicate evaluations skipped: {skipped_evaluations}")
-        print(f"  Total unique solutions in cache: {current_cache_size}")
+        print_generation_summary(
+            self.generation, 
+            total_evaluations_in_generation, 
+            new_evaluations, 
+            skipped_evaluations, 
+            current_cache_size
+        )
         
         # Update the plot at the end of each generation
         update_plot(
@@ -193,10 +206,10 @@ class EvaluationCallback(Callback):
             self.csv_filename, 
             self.solutions_by_key, 
             self.variable_names, 
-            self.metadata, self.ax, 
-            self.fig,
-            self.constrained_analysis,
-            self.overheating_criterion
+            self.metadata,
+            problem_type='envelope',
+            constrained_analysis=self.constrained_analysis,
+            overheating_criterion=self.overheating_criterion
         )
 
 
@@ -478,18 +491,7 @@ def main(
     }
     
     # Print optimization parameters
-    print("\nOptimization Parameters:")
-    print(f"  Weather File: {metadata['Weather_File']}")
-    print(f"  Number of Generations: {metadata['Number_of_Generations']}")
-    print(f"  Crossover Probability: {metadata['Crossover_Probability']}")
-    print(f"  Mutation Probability: {metadata['Mutation_Probability']}")
-    print(f"  Population Size: {metadata['Population_Size']}")
-    print(f"  Algorithm: {metadata['Algorithm']}")
-    print(f"  Debug Mode: {metadata['Debug_Mode']}")
-    print(f"  Number of Workers: {metadata['Number_of_Workers']}")
-    print(f"  Random Seed: {metadata['Seed']}")
-    print(f"  Constrained Analysis: {metadata['Constrained_Analysis']}")
-    print("-" * 50)
+    print_optimization_parameters(metadata)
     
     # Define callback with metadata
     callback = EvaluationCallback(
@@ -526,18 +528,11 @@ def main(
         pool.join()
         print("Closed multiprocessing pool")
     
-    # Print final cache statistics
-    print("\nFinal shared cache statistics:")
-    print("  Total cached combinations: {len(shared_cache)}")
+    # Print final results
+    print_final_results(res, shared_cache)
     
     # Save final results with updated Pareto optimality
     callback.save_final_results()
-    
-    print("\n" + "="*80)
-    print("FINAL RESULTS")
-    print("="*80)
-    print("Best solution found: %s" % res.X)
-    print("Function values: %s" % res.F)
     
     # Print optimization footer
     print_optimization_footer()

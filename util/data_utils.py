@@ -13,8 +13,12 @@ This module contains utility functions for:
 import json
 import os
 import csv
+import time
+import random
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+plt.ion()  # Enable interactive mode globally
 
 def x_to_params(x, optimization_variables):
     """Convert optimization variables x to parameter dictionary."""
@@ -229,18 +233,92 @@ def update_pareto_optimality_for_display(solutions_by_key, all_objectives):
             solutions_by_key[key]['pareto_optimal'] = pareto_optimal[i]
 
 
-def initialize_csv(csv_filename, variable_names, metadata, overheating_criterion='ASHRAE'):
-    """Initialize the CSV file with headers and metadata."""
+def initialize_csv(
+    csv_filename,
+    metadata,
+    variable_names=None,
+    problem_type='envelope',
+    constrained_analysis=False,
+    overheating_criterion='ASHRAE'
+):
+    """Initialize CSV headers for envelope or shading."""
     with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-        # Write metadata section
-        csvfile.write("# Optimization Metadata\n")
-        for key, value in metadata.items():
-            csvfile.write(f"# {key}: {value}\n")
-        csvfile.write("#\n")
-        
-        fieldnames = ['Generation', 'Iteration'] + variable_names + ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours', 'Pareto_Optimal']
+        csvfile.write('# Optimization Metadata\n')
+        for key, value in (metadata or {}).items():
+            csvfile.write('# %s: %s\n' % (key, value))
+        csvfile.write('#\n')
+
+        fieldnames = _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion)
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
+
+
+# Helper functions for CSV header/row construction
+
+def _objective_headers(problem_type, constrained_analysis, overheating_criterion):
+    if problem_type == 'shading':
+        return [
+            'Mechanical_Energy_Use_Intensity',
+            'Max_Living_Room_Overheating',
+            'Max_Bedroom_Overheating'
+        ]
+    if constrained_analysis:
+        if overheating_criterion.upper() == 'CIBSE59':
+            return [
+                'Mechanical_Energy_Use_Intensity',
+                'Max_Living_Room_Overheating',
+                'Max_Bedroom_Overheating'
+            ]
+        return ['Mechanical_Energy_Use_Intensity', 'Max_Overheating_Hours']
+    return ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours']
+
+
+def _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion):
+    base = ['Generation', 'Iteration']
+    objectives = _objective_headers(problem_type, constrained_analysis, overheating_criterion)
+    if problem_type == 'shading':
+        return base + ['Shading_Schedule'] + objectives + ['Pareto_Optimal']
+    vars_part = variable_names or []
+    tail = [] if constrained_analysis else ['Pareto_Optimal']
+    return base + vars_part + objectives + tail
+
+
+def _format_row(problem_type, result, variable_names, constrained_analysis, overheating_criterion, mode='run'):
+    # mode: 'run' (during optimization) or 'final' (after Pareto marking)
+    row = {
+        'Generation': result.get('generation') or 0,
+        'Iteration': result.get('iteration') or 0
+    }
+
+    if problem_type == 'shading':
+        schedule_str = ''.join('1' if v == 1 else '0' for v in result.get('shading_schedule', []))
+        row['Shading_Schedule'] = schedule_str
+        row['Mechanical_Energy_Use_Intensity'] = '%.6f' % result.get('mechanical_energy_use_intensity', 0.0)
+        row['Max_Living_Room_Overheating'] = '%.3f' % result.get('max_living_room_overheating', 0.0)
+        row['Max_Bedroom_Overheating'] = '%.3f' % result.get('max_bedroom_overheating', 0.0)
+        row['Pareto_Optimal'] = '' if mode == 'run' else ('Yes' if result.get('pareto_optimal', False) else 'No')
+        return row
+
+    # envelope
+    if variable_names:
+        for var_name in variable_names:
+            if var_name in result:
+                row[var_name] = result[var_name]
+
+    row['Mechanical_Energy_Use_Intensity'] = '%.4f' % result.get('mechanical_energy_use_intensity', 0.0)
+
+    if constrained_analysis:
+        if overheating_criterion.upper() == 'CIBSE59':
+            row['Max_Living_Room_Overheating'] = '%.2f' % result.get('max_living_room_overheating', 0.0)
+            row['Max_Bedroom_Overheating'] = '%.2f' % result.get('max_bedroom_overheating', 0.0)
+        else:
+            row['Max_Overheating_Hours'] = '%.2f' % result.get('max_overheating_hours', 0.0)
+        return row
+
+    # unconstrained envelope
+    row['Average_Overheating_Hours'] = '%.2f' % result.get('average_overheating_hours', 0.0)
+    row['Pareto_Optimal'] = 'Pending' if mode == 'run' else ('Yes' if result.get('pareto_optimal', False) else 'No')
+    return row
 
 
 def save_to_csv(
@@ -248,57 +326,21 @@ def save_to_csv(
     solutions_by_generation, 
     solutions_by_key, 
     variable_names, 
-    generation, 
+    generation,
+    problem_type='envelope',
     constrained_analysis=False,
     overheating_criterion='ASHRAE'
 ):
-
-    """Save current generation results to CSV file."""
+    """General CSV save function that works for both envelope and shading problems."""
     if generation not in solutions_by_generation:
         return
-        
+
+    fieldnames = _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion)
     with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
-        # Determine fieldnames based on overheating criterion
-        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-            fieldnames = ['Generation', 'Iteration'] + variable_names + [
-                'Mechanical_Energy_Use_Intensity', 
-                'Max_Living_Room_Overheating',
-                'Max_Bedroom_Overheating'
-            ]
-        else:
-            fieldnames = ['Generation', 'Iteration'] + variable_names + [
-                'Mechanical_Energy_Use_Intensity', 
-                'Average_Overheating_Hours', 
-                'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
-            ]
-        
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        
-        # Write all results from this generation
         for combination_key in solutions_by_generation[generation]:
             result = solutions_by_key[combination_key]
-            if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-                row = {
-                    'Generation': result.get('generation') or 0,
-                    'Iteration': result.get('iteration') or 0,
-                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                    'Max_Living_Room_Overheating': f"{result.get('max_living_room_overheating', 0.0):.2f}",
-                    'Max_Bedroom_Overheating': f"{result.get('max_bedroom_overheating', 0.0):.2f}"
-                }
-            else:
-                row = {
-                    'Generation': result.get('generation') or 0,
-                    'Iteration': result.get('iteration') or 0,
-                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                    ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): 'Pending' if not constrained_analysis else f"{result['max_overheating_hours']:.2f}"  # Will be updated at the end
-                }
-            
-            # Add all variable values
-            for var_name in variable_names:
-                if var_name in result:
-                    row[var_name] = result[var_name]
-            
+            row = _format_row(problem_type, result, variable_names, constrained_analysis, overheating_criterion, mode='run')
             writer.writerow(row)
 
 
@@ -307,238 +349,398 @@ def save_final_results(
     solutions_by_key, 
     variable_names, 
     metadata, 
-    ax, 
-    fig, 
+    problem_type='envelope',
     constrained_analysis=False,
     overheating_criterion='ASHRAE'
 ):
-    
-    """Save final results with updated Pareto optimality."""
-    # Update Pareto optimality one final time for final CSV
-    all_objectives = []
-    for result in solutions_by_key.values():
-        all_objectives.append([
-            result['mechanical_energy_use_intensity'], 
-            result['average_overheating_hours'],
-            result['max_overheating_hours'] if constrained_analysis else None
-        ])
-    
+    """General final results save function."""
+    all_solutions = list(solutions_by_key.values())
+    if not all_solutions:
+        return
+
+    # Calculate Pareto optimality for unconstrained problems
     if not constrained_analysis:
-        update_pareto_optimality(solutions_by_key, all_objectives)
-    
-    # Write all results to CSV with proper Pareto optimality
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-        # Write metadata section
-        csvfile.write("# Optimization Metadata\n")
-        for key, value in metadata.items():
-            csvfile.write(f"# {key}: {value}\n")
-        csvfile.write("#\n")
-        
-        # Determine fieldnames based on overheating criterion
-        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-            fieldnames = ['Generation', 'Iteration'] + variable_names + [
-                'Mechanical_Energy_Use_Intensity', 
-                'Max_Living_Room_Overheating',
-                'Max_Bedroom_Overheating'
-            ]
+        if problem_type == 'shading':
+            F = np.array([
+                [
+                    s.get('mechanical_energy_use_intensity', 0.0),
+                    s.get('max_living_room_overheating', 0.0),
+                    s.get('max_bedroom_overheating', 0.0),
+                ]
+                for s in all_solutions
+            ])
         else:
-            fieldnames = ['Generation', 'Iteration'] + variable_names + [
-                'Mechanical_Energy_Use_Intensity', 
-                'Average_Overheating_Hours',
-                'Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'
-            ]
-        
+            F = np.array([
+                [
+                    s.get('mechanical_energy_use_intensity', 0.0),
+                    s.get('average_overheating_hours', 0.0)
+                ]
+                for s in all_solutions
+            ])
+
+        n = len(F)
+        pareto = np.ones(n, dtype=bool)
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                if np.all(F[j] <= F[i]) and np.any(F[j] < F[i]):
+                    pareto[i] = False
+                    break
+        for solution, is_pareto in zip(all_solutions, pareto):
+            solution['pareto_optimal'] = is_pareto
+
+    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+        csvfile.write('# Optimization Metadata\n')
+        for key, value in (metadata or {}).items():
+            csvfile.write('# %s: %s\n' % (key, value))
+        csvfile.write('#\n')
+
+        fieldnames = _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion)
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        
-        for result in solutions_by_key.values():
-            if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-                row = {
-                    'Generation': result.get('generation') or 0,
-                    'Iteration': result.get('iteration') or 0,
-                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                    'Max_Living_Room_Overheating': f"{result.get('max_living_room_overheating', 0.0):.2f}",
-                    'Max_Bedroom_Overheating': f"{result.get('max_bedroom_overheating', 0.0):.2f}"
-                }
-            else:
-                row = {
-                    'Generation': result.get('generation') or 0,
-                    'Iteration': result.get('iteration') or 0,
-                    'Mechanical_Energy_Use_Intensity': f"{result['mechanical_energy_use_intensity']:.4f}",
-                    'Average_Overheating_Hours': f"{result['average_overheating_hours']:.2f}",
-                    ('Pareto_Optimal' if not constrained_analysis else 'Max_Overheating_Hours'): f"{result['max_overheating_hours']:.2f}" if constrained_analysis else ('Yes' if result['pareto_optimal'] else 'No')
-                }
-            
-            # Add all variable values
-            for var_name in variable_names:
-                if var_name in result:
-                    row[var_name] = result[var_name]
-            
+
+        for s in all_solutions:
+            row = _format_row(problem_type, s, variable_names, constrained_analysis, overheating_criterion, mode='final')
             writer.writerow(row)
-    
-    # Update title to show final results
-    if ax is not None and fig is not None:
-        pareto_count = sum(1 for result in solutions_by_key.values() if result['pareto_optimal']) if not constrained_analysis else None
-        ax.set_title(f'FINAL RESULTS - {pareto_count} Pareto Optimal Solutions out of {len(solutions_by_key)} Total') if not constrained_analysis else None
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-    
-    print(f"\nOptimization complete! Results saved to: {csv_filename}")
+
+    print("\nOptimization complete! Results saved to: %s" % csv_filename)
     if not constrained_analysis:
         print("Pareto optimal solutions have been identified and marked in the CSV file.")
 
 
-def initialize_plot(constrained_analysis=False, overheating_criterion='ASHRAE'):
-    """Initialize the live scatter plot."""
-    try:
-        plt.ion()  # Turn on interactive mode
-        fig, ax = plt.subplots(figsize=(10, 8))
-        ax.set_xlabel('Mechanical Energy Use Intensity (kWh/m²)')
-        
-        # Set appropriate y-axis label based on criterion
-        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-            ax.set_ylabel('Max Living Room Overheating Hours')
-        elif constrained_analysis:
-            ax.set_ylabel('Max Overheating Hours')
-        else:
-            ax.set_ylabel('Average Overheating Hours')
-            
-        ax.set_title('Optimization Progress - Pareto Front' if not constrained_analysis else 'Optimization Progress - Constrained Analysis')
-        ax.grid(True, alpha=0.3)
-
-        # Set default axis limits so axes are visible even with no data
-        ax.set_xlim(0, 1)
-        if constrained_analysis:
-            if overheating_criterion.upper() == 'CIBSE59':
-                # For CIBSE59, use more appropriate limits for overheating hours
-                ax.set_ylim(0, 50)  # 0-50 hours range
-            else:
-                # For ASHRAE, allow negative values on y-axis
-                ax.set_ylim(-30, 10)
-        else:
-            ax.set_ylim(0, 1)
-
-        # Create persistent scatter plot objects
-        scatter_all = ax.scatter(
-            [], 
-            [], 
-            c='blue', 
-            alpha=0.6, 
-            s=50, 
-            label='Non-Pareto Optimal' if not constrained_analysis else 'Solutions'
-        )
-        
-        scatter_pareto = ax.scatter([], [], c='red', s=100, label='Pareto Optimal')
-
-        ax.legend()
-        plt.tight_layout()
-        plt.show()
-        print("Plot initialized successfully!")
-        return fig, ax, scatter_all, scatter_pareto
-    except Exception as e:
-        print(f"Error initializing plot: {e}")
-        return None, None, None, None
+def initialize_plots():
+    """Initialize the two plots that will be updated during optimization."""
+    # Create two figures with specific names for identification
+    heatmap_fig = plt.figure('Shading Strategy', figsize=(10, 12))
+    evolution_fig = plt.figure('Evolution', figsize=(8, 10))
+    
+    # Clear any existing content
+    heatmap_fig.clear()
+    evolution_fig.clear()
+    
+    # Create axes for evolution plot
+    evolution_axes = evolution_fig.subplots(3, 1)
+    evolution_fig.suptitle('Evolution of Solutions', fontsize=14)
+    
+    # Set up evolution plot axes
+    evolution_axes[0].set_ylabel('MEUI (kWh/m²)')
+    evolution_axes[0].grid(True)
+    
+    evolution_axes[1].set_ylabel('Living Room Overheating (hrs)')
+    evolution_axes[1].grid(True)
+    
+    evolution_axes[2].set_ylabel('Bedroom Overheating (hrs)')
+    evolution_axes[2].set_xlabel('Generation')
+    evolution_axes[2].grid(True)
+    
+    # Create axes for heatmap
+    heatmap_axes = heatmap_fig.subplots(3, 2)
+    heatmap_fig.suptitle('Shading Strategy (Minimizing Total Overheating Hours)', fontsize=16, y=0.95)
+    
+    # Show the figures
+    heatmap_fig.show()
+    evolution_fig.show()
+    
+    return heatmap_fig, heatmap_axes, evolution_fig, evolution_axes
 
 
-def update_plot(
-    solutions_by_key, 
-    generation, 
-    fig, 
-    ax, 
-    scatter_all, 
-    scatter_pareto, 
-    constrained_analysis=False,
-    overheating_criterion='ASHRAE'
-):
-    """Update the scatter plot with current data."""
-    if not solutions_by_key or fig is None or ax is None:
+def plot_shading_heat_map(best_solution, fig=None, axes=None):
+    """
+    Plot and display the best shading strategy as a heatmap for each shading element.
+    Updates the display in real-time during optimization.
+    
+    Args:
+        best_solution: List of 144 binary values representing the best shading strategy
+        fig: Figure to update (if None, creates new figure)
+        axes: Axes to update (if None, creates new axes)
+    """
+    if fig is None or axes is None:
         return
     
-    try:
-        # Extract data from solutions_by_key
-        all_solutions = list(solutions_by_key.values())
-        meui_values = [result['mechanical_energy_use_intensity'] for result in all_solutions]
+    # Define labels
+    shading_elements = [
+        'South Overhang', 'South Fin',
+        'West Overhang', 'West Fin',
+        'East Overhang', 'East Fin'
+    ]
+    seasons = ['Summer', 'Spring', 'Winter', 'Fall']
+    time_periods = [
+        '6-8am', '8-10am', '10am-12pm',
+        '12-2pm', '2-4pm', '4-6pm'
+    ]
+    
+    # Plot each shading element
+    for idx, (ax, element) in enumerate(zip(axes.flatten(), shading_elements)):
+        # Clear the axis
+        ax.clear()
         
-        # Choose appropriate overheating values based on criterion
-        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-            overheating_values = [result.get('max_living_room_overheating', 0.0) for result in all_solutions]
+        # Extract data for this element (24 values: 4 seasons × 6 time periods)
+        start_idx = idx * 24
+        element_data = best_solution[start_idx:start_idx + 24]
+        
+        # Reshape into 4×6 matrix (seasons × time periods)
+        data_matrix = np.array(element_data).reshape(4, 6)
+        
+        # Create heatmap
+        sns.heatmap(
+            data_matrix,
+            ax=ax,
+            cmap='RdYlBu_r',  # Red for shading deployed, white for retracted
+            cbar=False,
+            xticklabels=time_periods,
+            yticklabels=seasons,
+            linewidths=0.5,
+            linecolor='gray',
+            square=True,
+            annot=True,  # Show values in cells
+            fmt='d',     # Integer format for annotations
+            cbar_kws={'label': 'Shading Deployed'}
+        )
+        
+        # Customize subplot
+        ax.set_title(element, pad=10)
+        ax.set_ylabel('Season')
+        
+        # Only show x-axis labels and title for bottom two subplots (indices 4 and 5)
+        if idx in [4, 5]:
+            ax.set_xlabel('Time of Day')
+            ax.set_xticklabels(time_periods, rotation=45, ha='right')
         else:
-            overheating_values = [result['average_overheating_hours'] if not constrained_analysis else result['max_overheating_hours'] for result in all_solutions]
-        
-        if constrained_analysis:
-            # For constrained analysis: plot all solutions as mechanical energy vs average overheating
-            # No Pareto analysis needed
-            scatter_all.set_offsets(np.column_stack([meui_values, overheating_values]))
-            scatter_pareto.set_offsets(np.empty((0, 2)))  # Hide Pareto scatter
-            
-            # Auto-adjust axis limits
-            if meui_values:
-                x_min, x_max = min(meui_values), max(meui_values)
-                y_min, y_max = min(overheating_values), max(overheating_values)
-                
-                # Add some padding
-                x_range = x_max - x_min
-                y_range = y_max - y_min
-                if x_range > 0:
-                    ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
-                if y_range > 0:
-                    ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
-            
-            # Update title for constrained analysis
-            ax.set_title(f'Generation {generation} - Constrained Analysis ({len(solutions_by_key)} Solutions)')
-            
-        else:
-            # For unconstrained analysis: continue with Pareto analysis
-            pareto_mask = [result['pareto_optimal'] for result in all_solutions]
-            
-            # Separate Pareto optimal and non-Pareto optimal solutions
-            pareto_meui = [meui_values[i] for i in range(len(meui_values)) if pareto_mask[i]]
-            pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if pareto_mask[i]]
-            
-            non_pareto_meui = [meui_values[i] for i in range(len(meui_values)) if not pareto_mask[i]]
-            non_pareto_overheating = [overheating_values[i] for i in range(len(overheating_values)) if not pareto_mask[i]]
-            
-            # Update scatter plot data (don't recreate objects)
-            if non_pareto_meui:
-                scatter_all.set_offsets(np.column_stack([non_pareto_meui, non_pareto_overheating]))
-            else:
-                scatter_all.set_offsets(np.empty((0, 2)))
-            
-            if pareto_meui:
-                scatter_pareto.set_offsets(np.column_stack([pareto_meui, pareto_overheating]))
-            else:
-                scatter_pareto.set_offsets(np.empty((0, 2)))
-            
-            # Auto-adjust axis limits
-            if meui_values:
-                x_min, x_max = min(meui_values), max(meui_values)
-                y_min, y_max = min(overheating_values), max(overheating_values)
-                
-                # Add some padding
-                x_range = x_max - x_min
-                y_range = y_max - y_min
-                if x_range > 0:
-                    ax.set_xlim(x_min - 0.1 * x_range, x_max + 0.1 * x_range)
-                if y_range > 0:
-                    ax.set_ylim(y_min - 0.1 * y_range, y_max + 0.1 * y_range)
-            
-            # Update title with generation info and Pareto count
-            pareto_count = sum(pareto_mask)
-            ax.set_title(f'Generation {generation} - {pareto_count} Pareto Optimal out of {len(solutions_by_key)} Total Solutions')
-        
-        # Update the plot with proper event loop breathing room
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-        plt.pause(0.01)  # Give GUI framework time to handle events
-        
-    except Exception as e:
-        print(f"Error updating plot: {e}")
+            ax.set_xticklabels([])
+    
+    # Update title with more space from subplots
+    fig.suptitle('Shading Strategy (Minimizing Total Overheating Hours)', fontsize=16, y=0.98)
+    
+    # Adjust layout and update display with padding for title
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+    plt.pause(0.1)  # Small pause to allow the plot to update
 
 
-def load_optimization_variables():
-    """Load optimization variables from JSON file."""
-    with open('optimization_variables.json', 'r') as f:
-        return json.load(f)
+def plot_evolution(solutions_by_key, top_n=5, fig=None, axes=None):
+    """
+    Plot and display the evolution of shading strategies across generations.
+    Shows the top N solutions by generation. Updates in real-time during optimization.
+    
+    Args:
+        solutions_by_key: Dictionary of solutions from optimization
+        top_n: Number of top solutions to show per generation
+        fig: Figure to update (if None, creates new figure)
+        axes: Axes to update (if None, creates new axes)
+    """
+    if fig is None or axes is None:
+        return
+    
+    # Group solutions by generation
+    solutions_by_gen = {}
+    for solution in solutions_by_key.values():
+        gen = solution['generation']
+        if gen not in solutions_by_gen:
+            solutions_by_gen[gen] = []
+        solutions_by_gen[gen].append(solution)
+    
+    # Calculate metrics for each generation
+    generations = sorted(solutions_by_gen.keys())
+    if not generations:
+        return
+    
+    # Clear all axes
+    for ax in axes:
+        ax.clear()
+    
+    # Plot MEUI evolution
+    avg_meui = [np.mean([s['mechanical_energy_use_intensity'] for s in solutions_by_gen[gen][:top_n]]) for gen in generations]
+    best_meui = [min([s['mechanical_energy_use_intensity'] for s in solutions_by_gen[gen]]) for gen in generations]
+    axes[0].plot(generations, avg_meui, 'b-', label=f'Avg Top {top_n}')
+    axes[0].plot(generations, best_meui, 'b--', label='Best')
+    axes[0].set_ylabel('MEUI (kWh/m²)')
+    axes[0].legend()
+    axes[0].grid(True)
+    
+    # Plot Living Room Overheating evolution
+    avg_lr = [np.mean([s['max_living_room_overheating'] for s in solutions_by_gen[gen][:top_n]]) for gen in generations]
+    best_lr = [min([s['max_living_room_overheating'] for s in solutions_by_gen[gen]]) for gen in generations]
+    axes[1].plot(generations, avg_lr, 'r-', label=f'Avg Top {top_n}')
+    axes[1].plot(generations, best_lr, 'r--', label='Best')
+    axes[1].set_ylabel('Living Room Overheating (hrs)')
+    axes[1].legend()
+    axes[1].grid(True)
+    
+    # Plot Bedroom Overheating evolution
+    avg_br = [np.mean([s['max_bedroom_overheating'] for s in solutions_by_gen[gen][:top_n]]) for gen in generations]
+    best_br = [min([s['max_bedroom_overheating'] for s in solutions_by_gen[gen]]) for gen in generations]
+    axes[2].plot(generations, avg_br, 'g-', label=f'Avg Top {top_n}')
+    axes[2].plot(generations, best_br, 'g--', label='Best')
+    axes[2].set_xlabel('Generation')
+    axes[2].set_ylabel('Bedroom Overheating (hrs)')
+    axes[2].legend()
+    axes[2].grid(True)
+    
+    # Update title
+    fig.suptitle(f'Evolution of Top {top_n} Solutions', fontsize=14)
+    
+    # Adjust layout and update display
+    plt.tight_layout()
+    fig.canvas.draw()
+    fig.canvas.flush_events()
+    plt.pause(0.1)  # Small pause to allow the plot to update
+
+
+def print_final_results(res, shared_cache):
+    """Print final optimization results."""
+    print("\n" + "="*80)
+    print("FINAL RESULTS")
+    print("="*80)
+    print("Best solution found: %s" % res.X)
+    print("Function values: %s" % res.F)
+    print("Number of evaluations: %s" % res.algorithm.evaluator.n_eval)
+    
+    # Print cache statistics
+    print("\nFinal shared cache statistics:")
+    print(f"  Total cached combinations: {len(shared_cache)}")
+
+
+def generate_dummy_shading_results(shading_schedule):
+    """Generate dummy simulation results for shading optimization testing."""
+    
+    # Simulate some computation time
+    time.sleep(0.01)  # Small delay to simulate computation
+    
+    # Generate dummy results based on shading schedule
+    # Convert shading schedule to a numeric value for calculation
+    shading_sum = sum(shading_schedule)
+    shading_ratio = shading_sum / len(shading_schedule)
+    
+    # Generate realistic dummy results
+    # More shading (higher ratio) should generally reduce overheating but may increase energy use
+    base_meui = 80.0  # Base mechanical energy use intensity
+    base_overheating = 25.0  # Base overheating hours
+    
+    # Adjust based on shading schedule
+    meui_variation = random.uniform(-10, 15)  # Random variation
+    overheating_variation = random.uniform(-8, 5)  # Random variation
+    
+    # Shading effect: more shading reduces overheating but may slightly increase energy use
+    meui = base_meui + meui_variation + (shading_ratio * 20)  # More shading = slightly higher energy use
+    average_overheating = max(0, base_overheating + overheating_variation - (shading_ratio * 15))  # More shading = less overheating
+    
+    # CIBSE59 specific values
+    max_living_room_overheating = max(0, random.uniform(10, 35) - (shading_ratio * 10))
+    max_bedroom_overheating = max(0, random.uniform(5, 25) - (shading_ratio * 8))
+    
+    return {
+        'success': True,
+        'district_heating_kwh': meui * 2590.29,  # Convert back to kWh
+        'average_overheating_hours': average_overheating,
+        'max_living_room_overheating': max_living_room_overheating,
+        'max_bedroom_overheating': max_bedroom_overheating
+    }
+
+
+def print_generation_summary(generation, total_evaluations, new_evaluations, skipped_evaluations, cache_size):
+    """Print generation summary information."""
+    print(f"\nGeneration {generation} Summary:")
+    print(f"  Total individuals in generation: {total_evaluations}")
+    print(f"  New unique evaluations: {new_evaluations}")
+    print(f"  Duplicate evaluations skipped: {skipped_evaluations}")
+    print(f"  Total unique solutions in cache: {cache_size}")
+
+
+def print_optimization_parameters(params_dict, algorithm_name="NSGA-II"):
+    """Print optimization parameters in a standardized format."""
+    print("\nOptimization Parameters:")
+    for key, value in params_dict.items():
+        print(f"  {key}: {value}")
+    print(f"  Algorithm: {algorithm_name}")
+    print("-" * 50)
+
+
+def print_shading_optimization_table(solutions_by_key):
+    """Print a table with all evaluated shading solutions."""
+    print("\n" + "="*130)
+    print("SHADING OPTIMIZATION RESULTS TABLE")
+    print("="*130)
+    print(f"{'Gen':<4} {'Iter':<5} {'Shading Schedule':<50} {'MEUI':<10} {'Max_LR':<8} {'Max_BR':<8} {'Pareto':<6}")
+    print("-"*130)
+    
+    # Get all solutions as a list for processing
+    all_solutions = []
+    for combination_key, solution in solutions_by_key.items():
+        all_solutions.append(solution)
+    
+    # Calculate Pareto optimality
+    objectives = np.array([[s['mechanical_energy_use_intensity'], 
+                          s['max_living_room_overheating'],
+                          s['max_bedroom_overheating']] for s in all_solutions])
+    pareto_mask = np.ones(len(objectives), dtype=bool)
+    
+    for i in range(len(objectives)):
+        for j in range(len(objectives)):
+            if i != j:
+                # Check if solution j dominates solution i
+                if np.all(objectives[j] <= objectives[i]) and np.any(objectives[j] < objectives[i]):
+                    pareto_mask[i] = False
+                    break
+    
+    # Mark Pareto optimality in solutions
+    for solution, is_pareto in zip(all_solutions, pareto_mask):
+        solution['pareto_optimal'] = is_pareto
+    
+    # Get Pareto optimal solutions
+    pareto_solutions = [s for s in all_solutions if s['pareto_optimal']]
+    
+    # Get last 100 non-Pareto solutions
+    non_pareto_solutions = [s for s in all_solutions if not s['pareto_optimal']]
+    last_100_non_pareto = sorted(non_pareto_solutions, 
+                                key=lambda x: (x['generation'], x['iteration']))[-100:]
+    
+    # Print Pareto optimal solutions first
+    if pareto_solutions:
+        print("PARETO OPTIMAL SOLUTIONS:")
+        for solution in sorted(pareto_solutions, key=lambda x: (x['generation'], x['iteration'])):
+            gen = solution['generation']
+            iteration = solution['iteration']
+            shading_schedule = solution['shading_schedule']
+            meui = solution['mechanical_energy_use_intensity']
+            max_lr = solution['max_living_room_overheating']
+            max_br = solution['max_bedroom_overheating']
+            
+            # Convert shading schedule to string representation
+            schedule_str = ''.join(['1' if x == 1 else '0' for x in shading_schedule[:20]])
+            if len(shading_schedule) > 20:
+                schedule_str += "..."
+            
+            print(f"{gen:<4} {iteration:<5} {schedule_str:<50} {meui:<10.2f} {max_lr:<8.1f} {max_br:<8.1f} {'✓':<6}")
+        
+        print("-"*130)
+    
+    # Print last 100 non-Pareto solutions
+    if last_100_non_pareto:
+        print("LAST 100 NON-PARETO SOLUTIONS:")
+        for solution in last_100_non_pareto:
+            gen = solution['generation']
+            iteration = solution['iteration']
+            shading_schedule = solution['shading_schedule']
+            meui = solution['mechanical_energy_use_intensity']
+            max_lr = solution['max_living_room_overheating']
+            max_br = solution['max_bedroom_overheating']
+            
+            # Convert shading schedule to string representation
+            schedule_str = ''.join(['1' if x == 1 else '0' for x in shading_schedule[:20]])
+            if len(shading_schedule) > 20:
+                schedule_str += "..."
+            
+            print(f"{gen:<4} {iteration:<5} {schedule_str:<50} {meui:<10.2f} {max_lr:<8.1f} {max_br:<8.1f} {' ':<6}")
+    
+    print("-"*130)
+    
+    # Print summary
+    print("\nSummary:")
+    print(f"  Total solutions: {len(all_solutions)}")
+    print(f"  Pareto optimal solutions: {len(pareto_solutions)}")
+    print(f"  Non-Pareto solutions shown: {len(last_100_non_pareto)}")
 
 
 def load_config():
@@ -551,4 +753,4 @@ def load_config():
             json.dump(sample, f, indent=2)
         return sample
     with open(config_path, 'r') as f:
-        return json.load(f) 
+        return json.load(f)
