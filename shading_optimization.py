@@ -19,12 +19,10 @@ from util.simulation_utils import (
     create_shared_cache,
     make_cache_key,
     get_from_cache,
-    set_in_cache,
-    save_cache_to_file
+    set_in_cache
 )
 from util.data_utils import (
     generate_dummy_shading_results,
-    print_generation_summary,
     print_optimization_parameters,
     print_final_results,
     print_shading_optimization_table,
@@ -43,11 +41,8 @@ class ShadingOptimizationCallback(Callback):
         super().__init__()
         self.shared_cache = shared_cache
         self.debug_mode = debug_mode
-        self.generation = 0
-        self.solutions_by_key = {}
-        self.solutions_by_generation = {}
-        self.all_objectives = []
         self.metadata = metadata or {}
+        self.saved_generations = set()
         
         # CSV setup using generalized initializer
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -64,31 +59,17 @@ class ShadingOptimizationCallback(Callback):
         self.heatmap_fig, self.heatmap_axes, self.evolution_fig, self.evolution_axes = initialize_plots()
         
     def notify(self, algorithm):
-        self.generation += 1
-        
-        # Update the problem's generation tracking
-        if hasattr(algorithm.problem, 'set_generation'):
-            algorithm.problem.set_generation(self.generation)
-        
-        # Get current population
-        X = algorithm.pop.get("X")
-        
-        # Calculate new evaluations and skipped evaluations based on cache size change
-        current_cache_size = len(self.shared_cache) if self.shared_cache is not None else 0
-        new_evaluations = current_cache_size - getattr(self, 'previous_cache_size', 0)
-        total_evaluations_in_generation = len(X)
-        skipped_evaluations = total_evaluations_in_generation - new_evaluations
-        
-        # Update previous cache size for next generation
-        self.previous_cache_size = current_cache_size
-        
-        # Build solutions from shared cache (single source of truth)
-        self.solutions_by_key = {}
-        self.solutions_by_generation = {}
-        self.all_objectives = []
-        
-        # Process all entries in shared cache
+        # Ensure the problem knows the current generation for tagging cache writes
+        current_generation = getattr(algorithm, 'n_gen', 0)
+        if hasattr(algorithm, 'problem') and hasattr(algorithm.problem, 'set_generation'):
+            algorithm.problem.set_generation(current_generation)
+
+        # Just save all cache data to CSV - simple and direct
         if self.shared_cache is not None:
+            # Build solutions directly from cache
+            solutions_by_key = {}
+            solutions_by_generation = {}
+            
             for i, (combination_key, cache_entry) in enumerate(self.shared_cache.items()):
                 if isinstance(cache_entry, dict) and 'objectives' in cache_entry:
                     objectives = cache_entry['objectives']
@@ -98,7 +79,6 @@ class ShadingOptimizationCallback(Callback):
                     
                     meui, max_lr_oh, max_br_oh = objectives
                     
-                    # Create solution dictionary
                     solution_dict = {
                         'generation': generation,
                         'iteration': iteration,
@@ -108,77 +88,89 @@ class ShadingOptimizationCallback(Callback):
                         'max_bedroom_overheating': max_br_oh
                     }
                     
-                    # Store in our dictionaries
-                    self.solutions_by_key[combination_key] = solution_dict
+                    solutions_by_key[combination_key] = solution_dict
                     
-                    # Track by generation
-                    if generation not in self.solutions_by_generation:
-                        self.solutions_by_generation[generation] = []
-                    self.solutions_by_generation[generation].append(combination_key)
-                    
-                    # Store objective values for Pareto comparison
-                    self.all_objectives.append([meui, max_lr_oh, max_br_oh])
-        
-        # Print comprehensive table
-        print_shading_optimization_table(self.solutions_by_key)
-        
-        # Append only unique members of this generation to CSV
-        save_to_csv(
-            self.csv_filename,
-            self.solutions_by_generation,
-            self.solutions_by_key,
-            [],  # No variable names for shading
-            self.generation,
-            problem_type='shading',
-            constrained_analysis=False,
-            overheating_criterion='CIBSE59'
-        )
+                    if generation not in solutions_by_generation:
+                        solutions_by_generation[generation] = []
+                    solutions_by_generation[generation].append(combination_key)
+            
+            # Print table
+            print_shading_optimization_table(solutions_by_key)
 
-        # Print efficiency info
-        print_generation_summary(
-            self.generation, 
-            total_evaluations_in_generation, 
-            new_evaluations, 
-            skipped_evaluations, 
-            current_cache_size
-        )
-        
-        # Find the best solution in this generation
-        if self.solutions_by_key:
-            solutions = list(self.solutions_by_key.values())
-            # Sort by sum of overheating hours (living room + bedroom)
-            solutions.sort(key=lambda x: (x['max_living_room_overheating'] + x['max_bedroom_overheating']))
-            best_solution = solutions[0]
+            # Save CSV only for generations that have completed
+            gens_present = sorted(solutions_by_generation.keys())
+            gens_to_save = [g for g in gens_present if g < current_generation and g not in self.saved_generations]
+            for g in gens_to_save:
+                save_to_csv(
+                    self.csv_filename,
+                    solutions_by_generation,
+                    solutions_by_key,
+                    [],  # No variable names for shading
+                    g,
+                    problem_type='shading',
+                    constrained_analysis=False,
+                    overheating_criterion='CIBSE59'
+                )
+            if gens_to_save:
+                self.saved_generations.update(gens_to_save)
             
-            # Update plots
-            plot_shading_heat_map(
-                best_solution['shading_schedule'],
-                fig=self.heatmap_fig,
-                axes=self.heatmap_axes
-            )
+            # Print summary
+            current_cache_size = len(self.shared_cache)
+            print(f"\nGeneration {current_generation} Summary:")
+            print(f"  Total solutions in cache: {current_cache_size}")
             
-            # Update evolution plot
-            plot_evolution(
-                self.solutions_by_key,
-                fig=self.evolution_fig,
-                axes=self.evolution_axes
-            )
-        
-        # Save cache at the end of each generation if in debug mode
-        if self.debug_mode and self.shared_cache is not None:
-            save_cache_to_file(self.shared_cache, self.generation)
+            # Update plots if we have solutions
+            if solutions_by_key:
+                solutions = list(solutions_by_key.values())
+                solutions.sort(key=lambda x: (x['max_living_room_overheating'] + x['max_bedroom_overheating']))
+                best_solution = solutions[0]
+                
+                plot_shading_heat_map(
+                    best_solution['shading_schedule'],
+                    fig=self.heatmap_fig,
+                    axes=self.heatmap_axes
+                )
+                
+                plot_evolution(
+                    solutions_by_key,
+                    fig=self.evolution_fig,
+                    axes=self.evolution_axes
+                )
     
     def finalize_csv(self):
         # Mark Pareto optimal across all generations and rewrite CSV
-        save_final_results(
-            self.csv_filename, 
-            self.solutions_by_key, 
-            [],  # No variable names for shading
-            self.metadata,
-            problem_type='shading',
-            constrained_analysis=False,
-            overheating_criterion='CIBSE59'
-        )
+        # Build solutions from cache for final processing
+        if self.shared_cache is not None:
+            solutions_by_key = {}
+            for i, (combination_key, cache_entry) in enumerate(self.shared_cache.items()):
+                if isinstance(cache_entry, dict) and 'objectives' in cache_entry:
+                    objectives = cache_entry['objectives']
+                    generation = cache_entry.get('generation', 0)
+                    params = cache_entry.get('params')
+                    iteration = i + 1
+                    
+                    meui, max_lr_oh, max_br_oh = objectives
+                    
+                    solution_dict = {
+                        'generation': generation,
+                        'iteration': iteration,
+                        'shading_schedule': params.get('shading_schedule', []) if params else [],
+                        'mechanical_energy_use_intensity': meui,
+                        'max_living_room_overheating': max_lr_oh,
+                        'max_bedroom_overheating': max_br_oh
+                    }
+                    
+                    solutions_by_key[combination_key] = solution_dict
+            
+            save_final_results(
+                self.csv_filename, 
+                solutions_by_key, 
+                [],  # No variable names for shading
+                self.metadata,
+                problem_type='shading',
+                constrained_analysis=False,
+                overheating_criterion='CIBSE59'
+            )
     
 
 
@@ -190,7 +182,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
         shared_cache=None, 
         weather_file=None,
         overheating_criterion='CIBSE59',
-        test_mode=False
+        test_mode=True
     ):
         # 144 binary variables for shading optimization (6 hours * 24 hours)
         n_var = 144
@@ -224,8 +216,8 @@ class ShadingOptimizationProblem(ElementwiseProblem):
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
-            # Convert binary array to shading schedule
-            shading_schedule = x.tolist()  # 144-long binary list
+            # Convert to explicit 0/1 ints to avoid boolean strings
+            shading_schedule = [int(v) for v in x]
             
             # Create unique key for this combination
             combination_key = make_cache_key({'shading_schedule': shading_schedule})
@@ -248,9 +240,19 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 
                 # Run simulation with shading schedule
                 output_dir = run_simulation(
-                    idf_path="Building_Shading.idf",
+                    idf_path="Building_Shading_Renamed.idf",
                     weather_path=self.weather_file,
                     envelope_parameters= {
+                        "external_wall": "R35 - Wall",
+                        "roof": "R55 - Roof",
+                        "window": "SageGlass Climatop Blue No Tint - 1007",
+                        "infiltration_ach": 0.78,
+                        "wwr_east": 0.36,
+                        "wwr_west": 0.30,
+                        "wwr_north": 0.20,
+                        "wwr_south": 0.25,
+                        "wall_solar_absorptance": 0.15,
+                        "roof_solar_absorptance": 0.37,
                         'shading_schedule': shading_schedule
                     },  # Pass shading schedule
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
@@ -258,8 +260,12 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                     verbose='q'
                 )
                 
-                results = analyze_simulation_results(output_dir, overheating_criterion=self.overheating_criterion)
-            
+                results = analyze_simulation_results(
+                    output_dir,
+                    cleanup=False,
+                    overheating_criterion=self.overheating_criterion
+                )
+                        
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 mechanical_energy_use_intensity = district_heating / 2590.29
@@ -438,7 +444,7 @@ if __name__ == "__main__":
         debug_mode=True,
         weather_file="Vancouver - 2021 AMY.epw",
         overheating_criterion='CIBSE59',
-        test_mode=True  # Enable test mode for quick testing
+        test_mode = False # Enable test mode for quick testing
     )
     
     print("\nShading optimization problem initialized successfully!")
@@ -450,10 +456,10 @@ if __name__ == "__main__":
             pool=pool,
             shared_cache=shared_cache,
             n_generations=10,  # Small number for testing
-            population_size=8,   # Small population for testing
+            population_size=4,   # Small population for testing
             crossover_prob=0.8,
             mutation_prob=0.1,
-            seed=None  # Will generate seed automatically
+            seed=None,  # Will generate seed automatically
         )
         
         print("\nOptimization completed successfully!")

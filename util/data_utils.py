@@ -550,29 +550,47 @@ def plot_evolution(solutions_by_key, top_n=5, fig=None, axes=None):
     for ax in axes:
         ax.clear()
     
-    # Plot MEUI evolution
-    avg_meui = [np.mean([s['mechanical_energy_use_intensity'] for s in solutions_by_gen[gen][:top_n]]) for gen in generations]
-    best_meui = [min([s['mechanical_energy_use_intensity'] for s in solutions_by_gen[gen]]) for gen in generations]
-    axes[0].plot(generations, avg_meui, 'b-', label=f'Avg Top {top_n}')
-    axes[0].plot(generations, best_meui, 'b--', label='Best')
+    # Plot MEUI evolution (use markers so single-generation results are visible)
+    avg_meui = [np.mean([s['mechanical_energy_use_intensity']
+                         for s in solutions_by_gen[gen][:top_n]])
+                for gen in generations]
+    best_meui = [min([s['mechanical_energy_use_intensity']
+                      for s in solutions_by_gen[gen]])
+                 for gen in generations]
+    axes[0].plot(generations, avg_meui, color='b', linestyle='-', marker='o',
+                 label=f'Avg Top {top_n}')
+    axes[0].plot(generations, best_meui, color='b', linestyle='--', marker='o',
+                 label='Best')
     axes[0].set_ylabel('MEUI (kWh/m²)')
     axes[0].legend()
     axes[0].grid(True)
     
     # Plot Living Room Overheating evolution
-    avg_lr = [np.mean([s['max_living_room_overheating'] for s in solutions_by_gen[gen][:top_n]]) for gen in generations]
-    best_lr = [min([s['max_living_room_overheating'] for s in solutions_by_gen[gen]]) for gen in generations]
-    axes[1].plot(generations, avg_lr, 'r-', label=f'Avg Top {top_n}')
-    axes[1].plot(generations, best_lr, 'r--', label='Best')
+    avg_lr = [np.mean([s['max_living_room_overheating']
+                       for s in solutions_by_gen[gen][:top_n]])
+              for gen in generations]
+    best_lr = [min([s['max_living_room_overheating']
+                    for s in solutions_by_gen[gen]])
+               for gen in generations]
+    axes[1].plot(generations, avg_lr, color='r', linestyle='-', marker='o',
+                 label=f'Avg Top {top_n}')
+    axes[1].plot(generations, best_lr, color='r', linestyle='--', marker='o',
+                 label='Best')
     axes[1].set_ylabel('Living Room Overheating (hrs)')
     axes[1].legend()
     axes[1].grid(True)
     
     # Plot Bedroom Overheating evolution
-    avg_br = [np.mean([s['max_bedroom_overheating'] for s in solutions_by_gen[gen][:top_n]]) for gen in generations]
-    best_br = [min([s['max_bedroom_overheating'] for s in solutions_by_gen[gen]]) for gen in generations]
-    axes[2].plot(generations, avg_br, 'g-', label=f'Avg Top {top_n}')
-    axes[2].plot(generations, best_br, 'g--', label='Best')
+    avg_br = [np.mean([s['max_bedroom_overheating']
+                       for s in solutions_by_gen[gen][:top_n]])
+              for gen in generations]
+    best_br = [min([s['max_bedroom_overheating']
+                    for s in solutions_by_gen[gen]])
+               for gen in generations]
+    axes[2].plot(generations, avg_br, color='g', linestyle='-', marker='o',
+                 label=f'Avg Top {top_n}')
+    axes[2].plot(generations, best_br, color='g', linestyle='--', marker='o',
+                 label='Best')
     axes[2].set_xlabel('Generation')
     axes[2].set_ylabel('Bedroom Overheating (hrs)')
     axes[2].legend()
@@ -712,7 +730,8 @@ def print_shading_optimization_table(solutions_by_key):
             if len(shading_schedule) > 20:
                 schedule_str += "..."
             
-            print(f"{gen:<4} {iteration:<5} {schedule_str:<50} {meui:<10.2f} {max_lr:<8.1f} {max_br:<8.1f} {'✓':<6}")
+            # Use ASCII to avoid Windows console encoding issues
+            print(f"{gen:<4} {iteration:<5} {schedule_str:<50} {meui:<10.2f} {max_lr:<8.1f} {max_br:<8.1f} {'Yes':<6}")
         
         print("-"*130)
     
