@@ -17,7 +17,9 @@ def main():
 
     # Assign schedules per orientation/type (skip north as required)
     assigned = assign_shading_transmittance_schedules(idf)
-    schedule = [0] * 144
+    import random
+    schedule = [random.randint(0, 1) for _ in range(144)]
+    
     idf =apply_shading_schedules_to_idf(idf, schedule)
     idf.saveas('Building_Shading_Renamed.idf')
     print('Assigned schedules: %d' % assigned)

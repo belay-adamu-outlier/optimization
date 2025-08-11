@@ -3,7 +3,11 @@ import numpy as np
 import os
 from datetime import datetime
 import matplotlib
-matplotlib.use('TkAgg')  # Use TkAgg backend for interactive plots
+# Use interactive backend only in main process to avoid GUI in workers
+if multiprocessing.current_process().name == 'MainProcess':
+    matplotlib.use('TkAgg')
+else:
+    matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from pymoo.algorithms.moo.nsga2 import NSGA2
@@ -240,29 +244,24 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 
                 # Run simulation with shading schedule
                 output_dir = run_simulation(
-                    idf_path="Building_Shading_Renamed.idf",
+                    idf_path="Building_Shading.idf",
                     weather_path=self.weather_file,
                     envelope_parameters= {
                         "external_wall": "R35 - Wall",
                         "roof": "R55 - Roof",
                         "window": "SageGlass Climatop Blue No Tint - 1007",
                         "infiltration_ach": 0.78,
-                        "wwr_east": 0.36,
-                        "wwr_west": 0.30,
-                        "wwr_north": 0.20,
-                        "wwr_south": 0.25,
                         "wall_solar_absorptance": 0.15,
                         "roof_solar_absorptance": 0.37,
                         'shading_schedule': shading_schedule
                     },  # Pass shading schedule
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
                     output_dir=f"shading_simulation_output_{timestamp}_pid{process_id}",
-                    verbose='q'
+                    # verbose='q'
                 )
                 
                 results = analyze_simulation_results(
                     output_dir,
-                    cleanup=False,
                     overheating_criterion=self.overheating_criterion
                 )
                         
@@ -335,14 +334,6 @@ def initialize_shading_optimization(
         pool = None
         runner = None
         print("Running in single-threaded mode")
-    if num_workers > 1:
-        pool = multiprocessing.Pool(num_workers)
-        runner = StarmapParallelization(pool.starmap)
-        print(f"Initialized multiprocessing pool with {num_workers} workers")
-    else:
-        pool = None
-        runner = None
-        print("Running in single-threaded mode")
     
     # Define problem - pass shared cache to all worker processes
     problem = ShadingOptimizationProblem(
@@ -374,68 +365,73 @@ def run_shading_optimization(
     seed=None
 ):
     """Run the shading optimization with the specified parameters."""
-    
-    # Generate seed if not provided
-    if seed is None:
-        import time
-        seed = int(time.time() * 1000) % (2**32)  # Use current time in milliseconds as seed
-    
-    # Set the seed for reproducibility
-    np.random.seed(seed)
-    
-    # Define algorithm for binary optimization
-    
-    algorithm = NSGA2(
-        pop_size=population_size,
-        sampling=BinaryRandomSampling(),
-        crossover=UniformCrossover(prob=crossover_prob),
-        mutation=BitflipMutation(prob=mutation_prob),
-        eliminate_duplicates=True
-    )
-    
-    # Print optimization parameters
-    params_dict = {
-        'Number of Generations': n_generations,
-        'Population Size': population_size,
-        'Crossover Probability': crossover_prob,
-        'Mutation Probability': mutation_prob,
-        'Random Seed': seed
-    }
-    print_optimization_parameters(params_dict, "NSGA-II with Binary Operators")
-    
-    # Create callback
-    metadata = {
-        'Algorithm': 'NSGA-II Binary',
-        'Weather_File': problem.weather_file,
-        'Generations': n_generations,
-        'Population_Size': population_size,
-        'Crossover_Probability': crossover_prob,
-        'Mutation_Probability': mutation_prob,
-        'Seed': seed
-    }
-    callback = ShadingOptimizationCallback(
-        shared_cache=shared_cache,
-        debug_mode=False,
-        metadata=metadata
-    )
-    
-    # Run optimization
-    res = minimize(
-        problem,
-        algorithm,
-        termination=('n_gen', n_generations),
-        save_history=True,
-        seed=seed,
-        verbose=True,
-        callback=callback
-    )
-    
-    # Print final results
-    print_final_results(res, shared_cache)
-    # Finalize CSV with Pareto marking
-    callback.finalize_csv()
-    
-    return res
+    try:
+        # Generate seed if not provided
+        if seed is None:
+            import time
+            seed = int(time.time() * 1000) % (2**32)  # Use current time in ms as seed
+
+        # Set the seed for reproducibility
+        np.random.seed(seed)
+
+        # Define algorithm for binary optimization
+        algorithm = NSGA2(
+            pop_size=population_size,
+            sampling=BinaryRandomSampling(),
+            crossover=UniformCrossover(prob=crossover_prob),
+            mutation=BitflipMutation(prob=mutation_prob),
+            eliminate_duplicates=True
+        )
+
+        # Print optimization parameters
+        params_dict = {
+            'Number of Generations': n_generations,
+            'Population Size': population_size,
+            'Crossover Probability': crossover_prob,
+            'Mutation Probability': mutation_prob,
+            'Random Seed': seed
+        }
+        print_optimization_parameters(params_dict, 'NSGA-II with Binary Operators')
+
+        # Create callback
+        metadata = {
+            'Algorithm': 'NSGA-II Binary',
+            'Weather_File': problem.weather_file,
+            'Generations': n_generations,
+            'Population_Size': population_size,
+            'Crossover_Probability': crossover_prob,
+            'Mutation_Probability': mutation_prob,
+            'Seed': seed
+        }
+        callback = ShadingOptimizationCallback(
+            shared_cache=shared_cache,
+            debug_mode=False,
+            metadata=metadata
+        )
+
+        # Run optimization
+        res = minimize(
+            problem,
+            algorithm,
+            termination=('n_gen', n_generations),
+            save_history=True,
+            seed=seed,
+            verbose=True,
+            callback=callback
+        )
+
+        # Print final results
+        print_final_results(res, shared_cache)
+        # Finalize CSV with Pareto marking
+        callback.finalize_csv()
+
+        return res
+    finally:
+        if pool is not None:
+            try:
+                pool.close()
+            finally:
+                pool.join()
 
 
 if __name__ == "__main__":
@@ -455,10 +451,10 @@ if __name__ == "__main__":
             problem=problem,
             pool=pool,
             shared_cache=shared_cache,
-            n_generations=10,  # Small number for testing
-            population_size=4,   # Small population for testing
-            crossover_prob=0.8,
-            mutation_prob=0.1,
+            n_generations=100,  # Small number for testing
+            population_size=60,   # Small population for testing
+            crossover_prob=1,
+            mutation_prob=0.02,
             seed=None,  # Will generate seed automatically
         )
         
