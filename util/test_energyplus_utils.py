@@ -7,6 +7,7 @@ Tests the top 4 functions with various scenarios including edge cases.
 import pytest
 import numpy as np
 from unittest.mock import Mock, MagicMock, patch
+from types import SimpleNamespace
 import tempfile
 import os
 from .energyplus_utils import (
@@ -14,7 +15,9 @@ from .energyplus_utils import (
     apply_infiltration_to_zones,
     calculate_window_geometry,
     apply_wwr_to_windows,
-    apply_solar_absorptance_to_surfaces
+    apply_solar_absorptance_to_surfaces,
+    rename_shading_elements_by_orientation,
+    assign_shading_transmittance_schedules,
 )
 
 
@@ -644,6 +647,199 @@ class TestApplySolarAbsorptanceToSurfaces:
         with pytest.raises(AttributeError):
             apply_solar_absorptance_to_surfaces(mock_idf_incomplete, materials_albedo)
 
+
+class TestShadingFunctions:
+    """Tests for shading rename and schedule assignment functions."""
+
+    def setup_method(self):
+        """Create a simple rectangular building and several shading objects."""
+        # Mock IDF and its objects map
+        self.idf = Mock()
+
+        # Define exterior walls to establish planes: x=0 (West), x=10 (East),
+        # y=0 (South), y=20 (North)
+        def make_wall(constant_axis: str, const_val: float):
+            wall = SimpleNamespace()
+            wall.Surface_Type = 'Wall'
+            wall.Outside_Boundary_Condition = 'Outdoors'
+            if constant_axis == 'x':
+                xs = [const_val, const_val, const_val, const_val]
+                ys = [0.0, 20.0, 20.0, 0.0]
+            else:
+                xs = [0.0, 10.0, 10.0, 0.0]
+                ys = [const_val, const_val, const_val, const_val]
+            zs = [0.0, 0.0, 3.0, 3.0]
+            for i in range(4):
+                setattr(wall, f'Vertex_{i+1}_Xcoordinate', xs[i])
+                setattr(wall, f'Vertex_{i+1}_Ycoordinate', ys[i])
+                setattr(wall, f'Vertex_{i+1}_Zcoordinate', zs[i])
+            return wall
+
+        west_wall = make_wall('x', 0.0)
+        east_wall = make_wall('x', 10.0)
+        south_wall = make_wall('y', 0.0)
+        north_wall = make_wall('y', 20.0)
+
+        # Create shading elements near each plane
+        def make_shade(name: str, verts):
+            shade = SimpleNamespace()
+            shade.Name = name
+            for i, (x, y, z) in enumerate(verts, start=1):
+                setattr(shade, f'Vertex_{i}_Xcoordinate', x)
+                setattr(shade, f'Vertex_{i}_Ycoordinate', y)
+                setattr(shade, f'Vertex_{i}_Zcoordinate', z)
+            return shade
+
+        # South Overhang (horizontal plate at y=0)
+        south_overhang = make_shade(
+            'SO_1',
+            [(2.0, 0.0, 3.0), (4.0, 0.0, 3.0), (4.0, 0.0, 3.5), (2.0, 0.0, 3.5)],
+        )
+
+        # East Fin (vertical fin at x=10)
+        east_fin = make_shade(
+            'EF_1',
+            [(10.0, 5.0, 1.0), (10.0, 5.2, 1.0), (10.0, 5.2, 3.5), (10.0, 5.0, 3.5)],
+        )
+
+        # West Overhang (horizontal plate at x=0)
+        west_overhang = make_shade(
+            'WO_1',
+            [(0.0, 6.0, 2.5), (0.0, 8.0, 2.5), (0.0, 8.0, 2.9), (0.0, 6.0, 2.9)],
+        )
+
+        # North Fin (vertical fin at y=20) - should be ignored by sched assign
+        north_fin = make_shade(
+            'NF_1',
+            [(6.0, 20.0, 0.5), (6.2, 20.0, 0.5), (6.2, 20.0, 3.0), (6.0, 20.0, 3.0)],
+        )
+
+        # Include one incomplete shade (skipped due to missing vertices)
+        incomplete_shade = SimpleNamespace()
+        incomplete_shade.Name = 'INC_1'
+        setattr(incomplete_shade, 'Vertex_1_Xcoordinate', 10.0)
+        # no other vertices set
+
+        self.idf.idfobjects = {
+            'BUILDINGSURFACE:DETAILED': [west_wall, east_wall, south_wall, north_wall],
+            'SHADING:ZONE:DETAILED': [south_overhang],
+            'SHADING:BUILDING:DETAILED': [east_fin, incomplete_shade],
+            'SHADING:SITE:DETAILED': [west_overhang, north_fin],
+        }
+
+        # Keep references for assertions
+        self.shades = {
+            'south_overhang': south_overhang,
+            'east_fin': east_fin,
+            'west_overhang': west_overhang,
+            'north_fin': north_fin,
+            'incomplete': incomplete_shade,
+        }
+
+    def test_rename_shading_elements_by_orientation(self):
+        """Shading names should be assigned by orientation and type."""
+        mapping = rename_shading_elements_by_orientation(self.idf)
+
+        # Incomplete shade should be skipped; 4 valid shades renamed
+        assert len(mapping) == 4
+
+        # Check specific renames
+        assert self.shades['south_overhang'].Name == 'South Overhang 1'
+        assert self.shades['east_fin'].Name == 'East Fin 1'
+        assert self.shades['west_overhang'].Name == 'West Overhang 1'
+        assert self.shades['north_fin'].Name == 'North Fin 1'
+
+        # Old names should map to new names in mapping
+        assert mapping['SO_1'] == 'South Overhang 1'
+        assert mapping['EF_1'] == 'East Fin 1'
+        assert mapping['WO_1'] == 'West Overhang 1'
+        assert mapping['NF_1'] == 'North Fin 1'
+
+    def test_assign_shading_transmittance_schedules(self):
+        """Schedules should be set for S/E/W elements, not for North."""
+        assigned = assign_shading_transmittance_schedules(self.idf)
+
+        # Should assign for South Overhang, East Fin, West Overhang (3 items)
+        assert assigned == 3
+
+        assert (
+            getattr(
+                self.shades['south_overhang'], 'Transmittance_Schedule_Name', None
+            )
+            == 'South Overhang Shading Schedule'
+        )
+        assert (
+            getattr(self.shades['east_fin'], 'Transmittance_Schedule_Name', None)
+            == 'East Fin Shading Schedule'
+        )
+        assert (
+            getattr(
+                self.shades['west_overhang'], 'Transmittance_Schedule_Name', None
+            )
+            == 'West Overhang Shading Schedule'
+        )
+
+        # North-facing fin should be ignored (no schedule set)
+        assert not hasattr(
+            self.shades['north_fin'], 'Transmittance_Schedule_Name'
+        )
+
+    def test_rename_with_offset_shading_elements(self):
+        """Elements near planes (not touching) should still be classified."""
+        # Create slight offsets from planes (still clearly closest to a plane)
+        idf = Mock()
+
+        def make_wall(constant_axis: str, const_val: float):
+            w = SimpleNamespace()
+            w.Surface_Type = 'Wall'
+            w.Outside_Boundary_Condition = 'Outdoors'
+            if constant_axis == 'x':
+                xs = [const_val] * 4
+                ys = [0.0, 20.0, 20.0, 0.0]
+            else:
+                xs = [0.0, 10.0, 10.0, 0.0]
+                ys = [const_val] * 4
+            zs = [0.0, 0.0, 3.0, 3.0]
+            for i in range(4):
+                setattr(w, f'Vertex_{i+1}_Xcoordinate', xs[i])
+                setattr(w, f'Vertex_{i+1}_Ycoordinate', ys[i])
+                setattr(w, f'Vertex_{i+1}_Zcoordinate', zs[i])
+            return w
+
+        walls = [
+            make_wall('x', 0.0),
+            make_wall('x', 10.0),
+            make_wall('y', 0.0),
+            make_wall('y', 20.0),
+        ]
+
+        def shade(verts):
+            s = SimpleNamespace()
+            for i, (x, y, z) in enumerate(verts, start=1):
+                setattr(s, f'Vertex_{i}_Xcoordinate', x)
+                setattr(s, f'Vertex_{i}_Ycoordinate', y)
+                setattr(s, f'Vertex_{i}_Zcoordinate', z)
+            return s
+
+        # West-overhang but 0.15 m away (x=0.15)
+        w_oh = shade([(0.15, 6.0, 2.5), (0.15, 8.0, 2.5), (0.15, 8.0, 2.9), (0.15, 6.0, 2.9)])
+        w_oh.Name = 'orig_w_oh'
+
+        # South-fin but -0.1 m beyond (y=-0.1)
+        s_fin = shade([(6.0, -0.1, 0.5), (6.2, -0.1, 0.5), (6.2, -0.1, 3.0), (6.0, -0.1, 3.0)])
+        s_fin.Name = 'orig_s_fin'
+
+        idf.idfobjects = {
+            'BUILDINGSURFACE:DETAILED': walls,
+            'SHADING:ZONE:DETAILED': [w_oh],
+            'SHADING:BUILDING:DETAILED': [s_fin],
+            'SHADING:SITE:DETAILED': [],
+        }
+
+        mapping = rename_shading_elements_by_orientation(idf)
+
+        assert mapping['orig_w_oh'].startswith('West Overhang ')
+        assert mapping['orig_s_fin'].startswith('South Fin ')
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 

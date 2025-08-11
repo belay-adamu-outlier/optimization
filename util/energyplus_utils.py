@@ -13,7 +13,212 @@ from eppy.modeleditor import IDF
 from .simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
 from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
+from typing import Dict, Tuple, List, Optional
 
+
+def _collect_vertices(surface, count: int = 4) -> Tuple[List[float], List[float], List[float]]:
+    """Return lists of x, y, z from up to 4 vertices on a surface.
+
+    Handles empty strings and non-numeric values gracefully by skipping
+    incomplete vertices.
+    """
+    def _as_float(value) -> Optional[float]:
+        if value is None:
+            return None
+        if isinstance(value, str) and value.strip() == '':
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    xs, ys, zs = [], [], []
+    for i in range(1, count + 1):
+        x = getattr(surface, 'Vertex_%d_Xcoordinate' % i, None)
+        y = getattr(surface, 'Vertex_%d_Ycoordinate' % i, None)
+        z = getattr(surface, 'Vertex_%d_Zcoordinate' % i, None)
+        fx, fy, fz = _as_float(x), _as_float(y), _as_float(z)
+        if fx is None or fy is None or fz is None:
+            continue
+        xs.append(fx)
+        ys.append(fy)
+        zs.append(fz)
+    return xs, ys, zs
+
+
+def _wall_plane_extents(idf, tol: float = 1e-6) -> Dict[str, Optional[float]]:
+    """Identify exterior wall planes and return extreme x/y values.
+
+    Returns a dict with keys: 'x_min', 'x_max', 'y_min', 'y_max'.
+    Only considers walls with Outside_Boundary_Condition == 'Outdoors' and
+    Surface_Type == 'Wall'. Assumes a rectangular building.
+    """
+    x_candidates = []
+    y_candidates = []
+    for wall in idf.idfobjects.get('BUILDINGSURFACE:DETAILED', []):
+        if getattr(wall, 'Surface_Type', '') != 'Wall':
+            continue
+        if getattr(wall, 'Outside_Boundary_Condition', '') != 'Outdoors':
+            continue
+        xs, ys, _ = _collect_vertices(wall)
+        if len(xs) < 2 or len(ys) < 2:
+            continue
+        if max(ys) - min(ys) <= tol:
+            y_candidates.append(np.mean(ys))
+        if max(xs) - min(xs) <= tol:
+            x_candidates.append(np.mean(xs))
+
+    if not x_candidates and not y_candidates:
+        return {'x_min': None, 'x_max': None, 'y_min': None, 'y_max': None}
+
+    x_min = min(x_candidates) if x_candidates else None
+    x_max = max(x_candidates) if x_candidates else None
+    y_min = min(y_candidates) if y_candidates else None
+    y_max = max(y_candidates) if y_candidates else None
+    return {'x_min': x_min, 'x_max': x_max, 'y_min': y_min, 'y_max': y_max}
+
+
+def _classify_shading_element(
+    xs: List[float],
+    ys: List[float],
+    zs: List[float],
+    planes: Dict[str, Optional[float]],
+    tol: float = 0.2,
+) -> Tuple[Optional[str], Optional[str]]:
+    """Classify a shading element's orientation and type.
+
+    The classification is tolerant to small offsets. Orientation is chosen
+    as the closest exterior wall plane (East/West/North/South). If the
+    element lies within ``tol`` of a plane it is considered aligned with
+    that plane; otherwise, the minimal distance orientation is still used.
+
+    Args:
+        xs, ys, zs: coordinate lists
+        planes: dict from _wall_plane_extents
+        tol: proximity tolerance (meters) to accept near-coplanar elements
+
+    Returns:
+        Tuple (orientation, element_type) where orientation in
+        {'North','South','East','West'} and element_type in
+        {'Overhang','Fin'}
+    """
+    if not xs or not ys or not zs:
+        return None, None
+
+    dx = max(xs) - min(xs)
+    dy = max(ys) - min(ys)
+    dz = max(zs) - min(zs)
+
+    # Determine element type based on extents
+    element_type = 'Fin' if dz > max(dx, dy) else 'Overhang'
+
+    # Determine orientation by comparing to wall planes using proximity
+    x_min, x_max = planes.get('x_min'), planes.get('x_max')
+    y_min, y_max = planes.get('y_min'), planes.get('y_max')
+
+    # Compute center-based distances to each plane
+    distances: List[Tuple[str, float]] = []
+    cx = np.mean(xs)
+    cy = np.mean(ys)
+    if x_max is not None:
+        distances.append(('East', abs(cx - x_max)))
+    if x_min is not None:
+        distances.append(('West', abs(cx - x_min)))
+    if y_max is not None:
+        distances.append(('North', abs(cy - y_max)))
+    if y_min is not None:
+        distances.append(('South', abs(cy - y_min)))
+
+    if not distances:
+        return None, element_type
+
+    # Prefer any plane within tolerance, else choose the closest
+    distances.sort(key=lambda t: t[1])
+    orientation = distances[0][0]
+
+    return orientation, element_type
+
+
+def rename_shading_elements_by_orientation(idf, tol: float = 1e-3) -> Dict[str, str]:
+    """Rename shading elements according to wall orientation and type.
+
+    - Filters exterior walls (Outdoors, Wall) and infers building planes.
+    - Classifies each shading element as Overhang or Fin using extents.
+    - Assigns names like 'South Overhang 1', 'West Fin 2', etc.
+
+    Returns a dict mapping old names to new names.
+    """
+    planes = _wall_plane_extents(idf)
+    counters = {
+        ('South', 'Overhang'): 0,
+        ('South', 'Fin'): 0,
+        ('East', 'Overhang'): 0,
+        ('East', 'Fin'): 0,
+        ('West', 'Overhang'): 0,
+        ('West', 'Fin'): 0,
+        ('North', 'Overhang'): 0,
+        ('North', 'Fin'): 0,
+    }
+    renamed = {}
+
+    shading_keys = [
+        'SHADING:ZONE:DETAILED',
+        'SHADING:BUILDING:DETAILED',
+        'SHADING:SITE:DETAILED',
+    ]
+
+    for key in shading_keys:
+        for shade in idf.idfobjects.get(key, []):
+            xs, ys, zs = _collect_vertices(shade)
+            orientation, element_type = _classify_shading_element(
+                xs, ys, zs, planes, tol=tol
+            )
+            if orientation is None or element_type is None:
+                continue
+            counters[(orientation, element_type)] += 1
+            idx = counters[(orientation, element_type)]
+            new_name = '%s %s %d' % (orientation, element_type, idx)
+            old_name = getattr(shade, 'Name', None)
+            shade.Name = new_name
+            renamed[old_name or new_name] = new_name
+
+    return renamed
+
+
+def assign_shading_transmittance_schedules(idf, tol: float = 1e-3) -> int:
+    """Assign transmittance schedules by orientation and element type.
+
+    South/East/West Overhangs and Fins get their respective schedules:
+    '<Orientation> <Type> Shading Schedule'. North-facing elements are
+    ignored as per current requirements.
+    """
+    planes = _wall_plane_extents(idf)
+    shading_keys = [
+        'SHADING:ZONE:DETAILED',
+        'SHADING:BUILDING:DETAILED',
+        'SHADING:SITE:DETAILED',
+    ]
+    assigned = 0
+
+    for key in shading_keys:
+        for shade in idf.idfobjects.get(key, []):
+            xs, ys, zs = _collect_vertices(shade)
+            orientation, element_type = _classify_shading_element(
+                xs, ys, zs, planes, tol=tol
+            )
+            if orientation in ('South', 'East', 'West') and element_type in (
+                'Overhang', 'Fin'
+            ):
+                sched = (
+                    orientation
+                    + ' '
+                    + element_type
+                    + ' Shading Schedule'
+                )
+                setattr(shade, 'Transmittance_Schedule_Name', sched)
+                assigned += 1
+
+    return assigned
 
 def apply_shading_schedules_to_idf(idf, transmittance_list):
     """
