@@ -220,6 +220,90 @@ def assign_shading_transmittance_schedules(idf, tol: float = 1e-3) -> int:
 
     return assigned
 
+
+
+
+def _normalize_transmittance_value(value):
+    """Convert value to binary (0 or 1) for transmittance."""
+    try:
+        return 1 if int(value) != 0 else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def _parse_seasonal_data(data):
+    """Parse seasonal data into 24-value list."""
+    if data is None:
+        return None
+    
+    if isinstance(data, (list, tuple)):
+        if not data:  # Empty list/tuple
+            return [0] * 24
+        return [_normalize_transmittance_value(v) for v in data[:24]] + [0] * max(0, 24 - len(data))
+    
+    if isinstance(data, dict):
+        if not data:  # Empty dict
+            return [0] * 24
+        seasons = ['spring', 'summer', 'fall', 'winter']
+        result = []
+        for season in seasons:
+            season_data = data.get(season, data.get('autumn' if season == 'fall' else season, []))
+            season_values = [_normalize_transmittance_value(v) for v in season_data[:6]]
+            result.extend(season_values + [0] * max(0, 6 - len(season_values)))
+        return result
+    
+    return [0] * 24
+
+
+def _create_schedule_fields(values_24):
+    """Create schedule fields for EnergyPlus schedule object."""
+    time_periods = [
+        ('24:00', '06:00'), ('06:00', '08:00'), ('08:00', '10:00'),
+        ('10:00', '12:00'), ('12:00', '14:00'), ('14:00', '16:00'),
+        ('16:00', '18:00'), ('18:00', '24:00')
+    ]
+    
+    season_dates = ['21 Mar', '21 Jun', '21 Sep', '21 Dec', '31 Dec']
+    season_ranges = [(0, 6), (6, 12), (12, 18), (18, 24), (0, 6)]
+    
+    fields = []
+    for (start, end), date in zip(season_ranges, season_dates):
+        fields.extend(['Through: %s' % date, 'For: AllDays'])
+        for i, (_, end_time) in enumerate(time_periods):
+            if i == 0:
+                val = 0
+            elif i <= 6:
+                val = values_24[start + min(i - 1, 5)]
+            else:
+                val = 0
+            fields.extend(['Until: %s' % end_time, str(val)])
+    
+    return fields
+
+
+def _remove_existing_schedule(idf, schedule_name):
+    """Remove existing schedule with given name."""
+    existing = [s for s in idf.idfobjects['SCHEDULE:COMPACT'] 
+                if s.Name == schedule_name]
+    for schedule in existing:
+        idf.removeidfobject(schedule)
+
+
+def _create_shading_schedule(idf, element_name, values_24):
+    """Create and configure a shading schedule object."""
+    schedule_name = f"{element_name.replace('_', ' ').title()} Shading Schedule"
+    
+    _remove_existing_schedule(idf, schedule_name)
+    
+    schedule = idf.newidfobject('SCHEDULE:COMPACT')
+    schedule.Name = schedule_name
+    schedule.Schedule_Type_Limits_Name = 'Fraction'
+    
+    fields = _create_schedule_fields(values_24)
+    for i, field_value in enumerate(fields, 1):
+        setattr(schedule, f'Field_{i}', field_value)
+
+
 def apply_shading_schedules_to_idf(idf, transmittance):
     """
     Apply shading schedules per element using 24 values (4 seasons × 6 slots).
@@ -239,133 +323,44 @@ def apply_shading_schedules_to_idf(idf, transmittance):
     Returns:
         IDF: Modified IDF with shading schedules applied
     """
-
-    def _to_int01(value):
-        try:
-            v = int(value)
-            return 1 if v != 0 else 0
-        except Exception:
-            return 0
-
-    def _normalize_element_24_values(data_for_element):
-        """Return list[24] ordered as spring, summer, fall, winter (6 each)."""
-        zero24 = [0] * 24
-        if data_for_element is None:
-            return zero24
-        # Flat list
-        if isinstance(data_for_element, (list, tuple)):
-            vals = [_to_int01(v) for v in list(data_for_element)[:24]]
-            return vals + [0] * (24 - len(vals))
-        # Dict (legacy seasonal keys)
-        if isinstance(data_for_element, dict):
-            spring = [_to_int01(x) for x in list(data_for_element.get('spring', [])[:6])]
-            summer = [_to_int01(x) for x in list(data_for_element.get('summer', [])[:6])]
-            fall = [_to_int01(x) for x in list(data_for_element.get('fall', data_for_element.get('autumn', []))[:6])]
-            winter = [_to_int01(x) for x in list(data_for_element.get('winter', [])[:6])]
-            spring += [0] * (6 - len(spring))
-            summer += [0] * (6 - len(summer))
-            fall += [0] * (6 - len(fall))
-            winter += [0] * (6 - len(winter))
-            return spring + summer + fall + winter
-        return zero24
-
-    # Define shading element names (order used for backward-compatible list)
     shading_elements = [
-        'south_overhang',
-        'south_fin',
-        'west_overhang',
-        'west_fin',
-        'east_overhang',
-        'east_fin',
+        'south_overhang', 'south_fin', 'west_overhang',
+        'west_fin', 'east_overhang', 'east_fin'
     ]
-
-    # Define time periods (8 blocks to cover 24h; we fill 06:00-18:00 from values)
-    time_periods = [
-        ('24:00', '06:00'),
-        ('06:00', '08:00'),
-        ('08:00', '10:00'),
-        ('10:00', '12:00'),
-        ('12:00', '14:00'),
-        ('14:00', '16:00'),
-        ('16:00', '18:00'),
-        ('18:00', '24:00'),
-    ]
-
-    # Build a per-element dict regardless of input type
+    
+    # Normalize input to element mapping
     if isinstance(transmittance, (list, tuple)):
         if len(transmittance) != 144:
-            raise ValueError(
-                'Expected 144 transmittance values for list input'
-            )
+            raise ValueError('Expected 144 transmittance values for list input')
+        
         elements_map = {}
-        for shade_idx, shade_name in enumerate(shading_elements):
-            start = shade_idx * 24
-            end = start + 24
-            elements_map[shade_name] = transmittance[start:end]
+        for i, element in enumerate(shading_elements):
+            start = i * 24
+            elements_map[element] = transmittance[start:start + 24]
+    
     elif isinstance(transmittance, dict):
-        # Normalize keys: accept names like 'South Overhang' or snake case
-        def _norm_key(k):
-            return str(k).strip().lower().replace(' ', '_')
-        elements_map = { _norm_key(k): v for k, v in transmittance.items() }
+        elements_map = {str(k).strip().lower().replace(' ', '_'): v 
+                       for k, v in transmittance.items()}
     else:
         raise TypeError('transmittance must be list[144] or dict')
-
-    # Process each shading element; skip if not provided in dict input
-    for shade_idx, shade_name in enumerate(shading_elements):
-        if shade_name not in elements_map:
-            # Omitted element => remove any existing schedule and continue
-            schedule_name = (
-                f"{shade_name.replace('_', ' ').title()} Shading Schedule"
-            )
-            to_remove = [
-                s for s in idf.idfobjects['SCHEDULE:COMPACT']
-                if s.Name == schedule_name
-            ]
-            for s in to_remove:
-                idf.removeidfobject(s)
+    
+    # Process each shading element
+    for element_name in shading_elements:
+        if element_name not in elements_map:
+            # Remove existing schedule if element not provided
+            schedule_name = f"{element_name.replace('_', ' ').title()} Shading Schedule"
+            _remove_existing_schedule(idf, schedule_name)
             continue
-
-        vals24 = _normalize_element_24_values(elements_map[shade_name])
-
-        schedule_name = (
-            f"{shade_name.replace('_', ' ').title()} Shading Schedule"
-        )
-        # Remove any existing schedule with this name
-        for existing in [
-            s for s in idf.idfobjects['SCHEDULE:COMPACT'] if s.Name == schedule_name
-        ]:
-            idf.removeidfobject(existing)
-
-        schedule = idf.newidfobject('SCHEDULE:COMPACT')
-        schedule.Name = schedule_name
-        schedule.Schedule_Type_Limits_Name = 'Fraction'
-
-        schedule_fields = []
-
-        def _append_season_block(six_vals, through):
-            schedule_fields.extend(['Through: %s' % through, 'For: AllDays'])
-            for period_idx, (_, end_time) in enumerate(time_periods):
-                if period_idx == 0:
-                    val = 0
-                elif period_idx < 6:
-                    val = six_vals[period_idx - 1]
-                elif period_idx == 6:
-                    val = six_vals[5]
-                else:
-                    val = 0
-                schedule_fields.extend(['Until: %s' % end_time, str(_to_int01(val))])
-
-        # Spring (0..5), Summer (6..11), Fall (12..17), Winter (18..23)
-        _append_season_block(vals24[0:6], '21 Mar')
-        _append_season_block(vals24[6:12], '21 Jun')
-        _append_season_block(vals24[12:18], '21 Sep')
-        _append_season_block(vals24[18:24], '21 Dec')
-        # Spring repeat to 31 Dec
-        _append_season_block(vals24[0:6], '31 Dec')
-
-        for i, field_value in enumerate(schedule_fields, 1):
-            setattr(schedule, 'Field_%d' % i, field_value)
-
+        
+        values_24 = _parse_seasonal_data(elements_map[element_name])
+        if values_24 is None:
+            # Remove existing schedule if data is None
+            schedule_name = f"{element_name.replace('_', ' ').title()} Shading Schedule"
+            _remove_existing_schedule(idf, schedule_name)
+            continue
+        
+        _create_shading_schedule(idf, element_name, values_24)
+    
     return idf
 
 

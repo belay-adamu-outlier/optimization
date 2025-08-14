@@ -989,7 +989,7 @@ def load_config():
         return json.load(f)
 
 
-def initialize_shading_heatmap(active_elements, figsize=(10, 2.9)):
+def initialize_shading_heatmap(active_elements, figsize=(7.5, 3.5)):
     """
     Initialize a heatmap figure and axes for shading optimization visualization.
     

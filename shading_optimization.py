@@ -319,7 +319,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                     shading_dict[name] = shading_schedule[start:start + 24]
 
                 output_dir = run_simulation(
-                    idf_path="Building_SW_Shading_Renamed_Fixed.idf",
+                    idf_path="Building_SW_Shading.idf",
                     weather_path=self.weather_file,
                     envelope_parameters= {
                         "infiltration_ach": 0.78,
@@ -329,7 +329,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                     },  # Pass shading schedule
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
                     output_dir=f"shading_simulation_output_{timestamp}_pid{process_id}",
-                    # verbose='q'
+                    verbose='q'
                 )
                 
                 results = analyze_simulation_results(
@@ -562,7 +562,7 @@ if __name__ == "__main__":
         weather_file="Vancouver - 2021 AMY.epw",
         overheating_criterion='CIBSE59',
         test_mode = False, # Enable test mode for quick testing
-        objectives=['meui', 'max_living_room_overheating', 'max_bedroom_overheating'],
+        objectives=['meui'],
         constraints={
             'max_living_room_overheating': 110,
             'max_bedroom_overheating': 32
@@ -577,10 +577,10 @@ if __name__ == "__main__":
             problem=problem,
             pool=pool,
             shared_cache=shared_cache,
-            n_generations=2,  # Small number for testing
-            population_size=8,   # Small population for testing
+            n_generations=100,  # Small number for testing
+            population_size=120,   # Small population for testing
             crossover_prob=1,
-            mutation_prob=0.5,
+            mutation_prob=0.015,
             seed=None,  # Will generate seed automatically
         )
         

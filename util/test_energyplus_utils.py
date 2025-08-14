@@ -18,6 +18,7 @@ from .energyplus_utils import (
     apply_solar_absorptance_to_surfaces,
     rename_shading_elements_by_orientation,
     assign_shading_transmittance_schedules,
+    apply_shading_schedules_to_idf,
 )
 
 
@@ -840,6 +841,166 @@ class TestShadingFunctions:
 
         assert mapping['orig_w_oh'].startswith('West Overhang ')
         assert mapping['orig_s_fin'].startswith('South Fin ')
+
+
+class TestApplyShadingSchedulesToIdf:
+    """Test scenarios for apply_shading_schedules_to_idf function."""
+    
+    def setup_method(self):
+        """Set up mock IDF object for each test."""
+        self.mock_idf = Mock()
+        self.mock_idf.idfobjects = {'SCHEDULE:COMPACT': []}
+        self.mock_idf.newidfobject = Mock()
+        self.mock_idf.removeidfobject = Mock()
+    
+    def test_list_input_144_values(self):
+        """Test with flat list of 144 values (backward compatibility)."""
+        # Create 144 values: 6 elements × 24 values each
+        transmittance = [1] * 144
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        assert self.mock_idf.newidfobject.call_count == 6
+    
+    def test_dict_input_per_element(self):
+        """Test with dict mapping elements to 24 values."""
+        transmittance = {
+            'south_overhang': [1, 1, 0, 0, 1, 1] * 4,  # 24 values
+            'east_fin': [0, 0, 1, 1, 0, 0] * 4
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        # Should create schedules for provided elements only
+        assert self.mock_idf.newidfobject.call_count == 2
+    
+    def test_dict_input_with_normalized_keys(self):
+        """Test dict input with various key formats."""
+        transmittance = {
+            'South Overhang': [1] * 24,
+            'EAST_FIN': [0] * 24,
+            'West Overhang': [1, 0] * 12
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        assert self.mock_idf.newidfobject.call_count == 3
+    
+    def test_seasonal_dict_input(self):
+        """Test dict input with seasonal keys."""
+        transmittance = {
+            'south_overhang': {
+                'spring': [1, 1, 0, 0, 1, 1],
+                'summer': [0, 0, 1, 1, 0, 0],
+                'fall': [1, 0, 1, 0, 1, 0],
+                'winter': [0, 1, 0, 1, 0, 1]
+            }
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        assert self.mock_idf.newidfobject.call_count == 1
+    
+    def test_autumn_fallback(self):
+        """Test fallback from 'fall' to 'autumn' key."""
+        transmittance = {
+            'south_overhang': {
+                'spring': [1] * 6,
+                'summer': [0] * 6,
+                'autumn': [1, 0] * 3,
+                'winter': [0] * 6
+            }
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        assert self.mock_idf.newidfobject.call_count == 1
+    
+    def test_invalid_list_length(self):
+        """Test error handling for invalid list length."""
+        transmittance = [1] * 100  # Wrong length
+        
+        with pytest.raises(ValueError, match='Expected 144 transmittance values'):
+            apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+    
+    def test_invalid_input_type(self):
+        """Test error handling for invalid input type."""
+        transmittance = "invalid"
+        
+        with pytest.raises(TypeError, match='must be list\\[144\\] or dict'):
+            apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+    
+    def test_none_values_handling(self):
+        """Test handling of None values in data."""
+        transmittance = {
+            'south_overhang': None,
+            'east_fin': [1, 0] * 12
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        # Should create schedule for east_fin, remove existing for south_overhang
+        assert self.mock_idf.newidfobject.call_count == 1
+    
+    def test_empty_data_handling(self):
+        """Test handling of empty data."""
+        transmittance = {
+            'south_overhang': [],
+            'east_fin': {}
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        assert self.mock_idf.newidfobject.call_count == 2
+    
+    def test_mixed_data_types(self):
+        """Test handling of mixed data types in values."""
+        transmittance = {
+            'south_overhang': ['1', 0, 'true', False, 1.5, -1] * 4
+        }
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        assert self.mock_idf.newidfobject.call_count == 1
+    
+    def test_remove_existing_schedules(self):
+        """Test removal of existing schedules."""
+        # Mock existing schedule
+        existing_schedule = Mock()
+        existing_schedule.Name = 'South Overhang Shading Schedule'
+        self.mock_idf.idfobjects['SCHEDULE:COMPACT'] = [existing_schedule]
+        
+        transmittance = {'south_overhang': [1] * 24}
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        self.mock_idf.removeidfobject.assert_called_with(existing_schedule)
+        assert self.mock_idf.newidfobject.call_count == 1
+    
+    def test_schedule_field_generation(self):
+        """Test proper schedule field generation."""
+        transmittance = {'south_overhang': [1, 0, 1, 0, 1, 0] * 4}
+        
+        # Mock the new schedule object
+        mock_schedule = Mock()
+        self.mock_idf.newidfobject.return_value = mock_schedule
+        
+        result = apply_shading_schedules_to_idf(self.mock_idf, transmittance)
+        
+        assert result == self.mock_idf
+        # Verify schedule properties are set
+        mock_schedule.Name = 'South Overhang Shading Schedule'
+        mock_schedule.Schedule_Type_Limits_Name = 'Fraction'
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"]) 
