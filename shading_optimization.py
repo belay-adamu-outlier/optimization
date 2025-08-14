@@ -1,3 +1,4 @@
+# External library imports
 import multiprocessing
 import numpy as np
 import os
@@ -18,6 +19,7 @@ from pymoo.operators.sampling.rnd import BinaryRandomSampling
 from pymoo.optimize import minimize
 from pymoo.core.callback import Callback
 
+# Own imports
 from util.energyplus_utils import run_simulation, analyze_simulation_results
 from util.simulation_utils import (
     create_shared_cache,
@@ -31,12 +33,13 @@ from util.data_utils import (
     print_final_results,
     print_shading_optimization_table,
     load_config,
-    plot_shading_heat_map,
     plot_evolution,
     initialize_plots,
+    plot_shading_heat_map,
     save_to_csv,
     save_final_results,
-    initialize_csv
+    initialize_csv,
+    initialize_shading_heatmap
 )
 
 
@@ -47,6 +50,16 @@ class ShadingOptimizationCallback(Callback):
         self.debug_mode = debug_mode
         self.metadata = metadata or {}
         self.saved_generations = set()
+        self.active_elements = self.metadata.get('active_elements', [
+            'south_overhang', 'south_fin', 'west_overhang', 'west_fin'
+        ])
+        self.enable_heatmap = self.metadata.get('enable_heatmap', True)
+        self.objective_names = self.metadata.get('objective_names', [
+            'Mechanical_Energy_Use_Intensity',
+            'Max_Living_Room_Overheating',
+            'Max_Bedroom_Overheating'
+        ])
+        self.multiobjective = self.metadata.get('multiobjective', True)
         
         # CSV setup using generalized initializer
         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -56,11 +69,16 @@ class ShadingOptimizationCallback(Callback):
             self.metadata,
             problem_type='shading',
             constrained_analysis=False,
-            overheating_criterion='CIBSE59'
+            overheating_criterion='CIBSE59',
+            objective_names=self.objective_names,
+            multiobjective=self.multiobjective
         )
         
         # Initialize plots
-        self.heatmap_fig, self.heatmap_axes, self.evolution_fig, self.evolution_axes = initialize_plots()
+        _, _, self.evolution_fig, self.evolution_axes = initialize_plots()
+        
+        # Initialize heatmap using utility function
+        self.heatmap_fig, self.heatmap_axes, _ = initialize_shading_heatmap(self.active_elements)
         
     def notify(self, algorithm):
         # Ensure the problem knows the current generation for tagging cache writes
@@ -81,7 +99,20 @@ class ShadingOptimizationCallback(Callback):
                     params = cache_entry.get('params')
                     iteration = i + 1
                     
-                    meui, max_lr_oh, max_br_oh = objectives
+                    # Support single or multi-objective by pulling from cache params
+                    meui = params.get('meui') if params else None
+                    max_lr_oh = cache_entry.get('max_living_room_overheating')
+                    max_br_oh = cache_entry.get('max_bedroom_overheating')
+                    # Fallback if objectives length is 3
+                    if meui is None:
+                        try:
+                            meui = objectives[0]
+                        except Exception:
+                            meui = 0.0
+                    if max_lr_oh is None and len(objectives) >= 2:
+                        max_lr_oh = objectives[1]
+                    if max_br_oh is None and len(objectives) >= 3:
+                        max_br_oh = objectives[2]
                     
                     solution_dict = {
                         'generation': generation,
@@ -99,7 +130,11 @@ class ShadingOptimizationCallback(Callback):
                     solutions_by_generation[generation].append(combination_key)
             
             # Print table
-            print_shading_optimization_table(solutions_by_key)
+            print_shading_optimization_table(
+                solutions_by_key,
+                multiobjective=self.multiobjective,
+                objective_names=['MEUI', 'Max_LR', 'Max_BR']
+            )
 
             # Save CSV only for generations that have completed
             gens_present = sorted(solutions_by_generation.keys())
@@ -113,7 +148,9 @@ class ShadingOptimizationCallback(Callback):
                     g,
                     problem_type='shading',
                     constrained_analysis=False,
-                    overheating_criterion='CIBSE59'
+                    overheating_criterion='CIBSE59',
+                    objective_names=self.objective_names,
+                    multiobjective=self.multiobjective
                 )
             if gens_to_save:
                 self.saved_generations.update(gens_to_save)
@@ -128,18 +165,20 @@ class ShadingOptimizationCallback(Callback):
                 solutions = list(solutions_by_key.values())
                 solutions.sort(key=lambda x: (x['max_living_room_overheating'] + x['max_bedroom_overheating']))
                 best_solution = solutions[0]
-                
+                # Dynamic heatmap for selected elements
                 plot_shading_heat_map(
-                    best_solution['shading_schedule'],
+                    best_solution.get('shading_schedule', []),
+                    self.active_elements,
                     fig=self.heatmap_fig,
                     axes=self.heatmap_axes
                 )
-                
-                plot_evolution(
-                    solutions_by_key,
-                    fig=self.evolution_fig,
-                    axes=self.evolution_axes
-                )
+                # Evolution plot
+                if hasattr(self, 'evolution_fig'):
+                    plot_evolution(
+                        solutions_by_key,
+                        fig=self.evolution_fig,
+                        axes=self.evolution_axes
+                    )
     
     def finalize_csv(self):
         # Mark Pareto optimal across all generations and rewrite CSV
@@ -153,7 +192,19 @@ class ShadingOptimizationCallback(Callback):
                     params = cache_entry.get('params')
                     iteration = i + 1
                     
-                    meui, max_lr_oh, max_br_oh = objectives
+                    meui = params.get('meui') if params else None
+                    max_lr_oh = cache_entry.get('max_living_room_overheating')
+                    max_br_oh = cache_entry.get('max_bedroom_overheating')
+
+                    if meui is None:
+                        try:
+                            meui = objectives[0]
+                        except Exception:
+                            meui = 0.0
+                    if max_lr_oh is None and len(objectives) >= 2:
+                        max_lr_oh = objectives[1]
+                    if max_br_oh is None and len(objectives) >= 3:
+                        max_br_oh = objectives[2]
                     
                     solution_dict = {
                         'generation': generation,
@@ -173,10 +224,10 @@ class ShadingOptimizationCallback(Callback):
                 self.metadata,
                 problem_type='shading',
                 constrained_analysis=False,
-                overheating_criterion='CIBSE59'
+                overheating_criterion='CIBSE59',
+                objective_names=self.objective_names,
+                multiobjective=self.multiobjective
             )
-    
-
 
 
 class ShadingOptimizationProblem(ElementwiseProblem):
@@ -186,10 +237,17 @@ class ShadingOptimizationProblem(ElementwiseProblem):
         shared_cache=None, 
         weather_file=None,
         overheating_criterion='CIBSE59',
-        test_mode=True
+        test_mode=True,
+        active_elements=None,
+        objectives=None,
+        constraints=None
     ):
-        # 144 binary variables for shading optimization (6 hours * 24 hours)
-        n_var = 144
+        # Active shading elements (default: South and West only)
+        self.active_elements = active_elements or [
+            'south_overhang', 'south_fin', 'west_overhang', 'west_fin'
+        ]
+        # 24 values per element (4 seasons x 6 periods)
+        n_var = len(self.active_elements) * 24
         
         # Binary variables: 0 = no shading, 1 = shading
         xl = np.zeros(n_var, dtype=int)  # Lower bound: 0
@@ -198,9 +256,20 @@ class ShadingOptimizationProblem(ElementwiseProblem):
         # No constraints for now - unconstrained optimization
         n_ieq_constr = 0
             
+        # Objectives handling
+        # Supported objective keys: 'meui', 'max_living_room_overheating', 'max_bedroom_overheating'
+        default_objectives = ['meui', 'max_living_room_overheating', 'max_bedroom_overheating']
+        self.objectives = objectives or default_objectives
+        self.multiobjective = len(self.objectives) > 1
+
+        # Constraints dict: keys same as objective keys; value is max allowed
+        self.constraints = constraints or {}
+        # Each bound provided yields a <= type constraint: f(x) - bound <= 0
+        n_ieq_constr = len([k for k in self.constraints.keys() if self.constraints[k] is not None])
+
         super().__init__(
             n_var=n_var,
-            n_obj=3,  # MEUI, Max Living Room Overheating, Max Bedroom Overheating
+            n_obj=len(self.objectives) if self.objectives else 1,
             n_ieq_constr=n_ieq_constr,
             xl=xl,
             xu=xu,
@@ -224,7 +293,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
             shading_schedule = [int(v) for v in x]
             
             # Create unique key for this combination
-            combination_key = make_cache_key({'shading_schedule': shading_schedule})
+            combination_key = make_cache_key({'shading_schedule': tuple(shading_schedule)})
             
             # Check if this combination has already been evaluated using shared cache
             if self.shared_cache is not None:
@@ -243,17 +312,20 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 
                 # Run simulation with shading schedule
+                # Build per-element 24-value dict for the IDF modifier
+                shading_dict = {}
+                for idx, name in enumerate(self.active_elements):
+                    start = idx * 24
+                    shading_dict[name] = shading_schedule[start:start + 24]
+
                 output_dir = run_simulation(
-                    idf_path="Building_Shading.idf",
+                    idf_path="Building_SW_Shading_Renamed_Fixed.idf",
                     weather_path=self.weather_file,
                     envelope_parameters= {
-                        "external_wall": "R35 - Wall",
-                        "roof": "R55 - Roof",
-                        "window": "SageGlass Climatop Blue No Tint - 1007",
                         "infiltration_ach": 0.78,
                         "wall_solar_absorptance": 0.15,
                         "roof_solar_absorptance": 0.37,
-                        'shading_schedule': shading_schedule
+                        'shading_schedule': shading_dict
                     },  # Pass shading schedule
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
                     output_dir=f"shading_simulation_output_{timestamp}_pid{process_id}",
@@ -267,25 +339,48 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                         
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
-                mechanical_energy_use_intensity = district_heating / 2590.29
+                mechanical_energy_use_intensity = district_heating / 271.24
                 
                 # CIBSE59 overheating analysis
                 max_living_room_overheating = results.get('max_living_room_overheating', 0.0) or 0.0
                 max_bedroom_overheating = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
-                
-                objective_values = [
-                    mechanical_energy_use_intensity,
-                    max_living_room_overheating,
-                    max_bedroom_overheating
-                ]
+
+                # Map measures for objective selection
+                measures = {
+                    'meui': mechanical_energy_use_intensity,
+                    'max_living_room_overheating': max_living_room_overheating,
+                    'max_bedroom_overheating': max_bedroom_overheating
+                }
+                objective_values = [measures[o] for o in self.objectives]
             else:
-                objective_values = [1000.0, 1000.0, 1000.0]  # Three objectives
+                # Penalty values
+                objective_values = [1000.0] * max(1, len(self.objectives))
+                # Define penalty measures explicitly so downstream code can use them
+                mechanical_energy_use_intensity = 1000.0
                 max_living_room_overheating = 1000.0
                 max_bedroom_overheating = 1000.0
                 max_overheating_hours = 0.0
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
             
+            # Build inequality constraints (<=0 satisfied)
+            constraints_vals = []
+            if self.constraints:
+                bounds_map = {
+                    'meui': self.constraints.get('meui'),
+                    'max_living_room_overheating': self.constraints.get('max_living_room_overheating'),
+                    'max_bedroom_overheating': self.constraints.get('max_bedroom_overheating')
+                }
+                measures_current = {
+                    'meui': objective_values[self.objectives.index('meui')] if 'meui' in self.objectives else mechanical_energy_use_intensity,
+                    'max_living_room_overheating': max_living_room_overheating,
+                    'max_bedroom_overheating': max_bedroom_overheating
+                }
+                for key, bound in bounds_map.items():
+                    if bound is None:
+                        continue
+                    constraints_vals.append(measures_current[key] - float(bound))
+
             # Store results in shared cache
             if self.shared_cache is not None:
                 set_in_cache(
@@ -294,12 +389,19 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                     objective_values, 
                     max_overheating_hours, 
                     generation=self.current_generation,
-                    params={'shading_schedule': shading_schedule},
+                    params={
+                        'shading_schedule': shading_schedule,
+                        'active_elements': self.active_elements,
+                        'meui': mechanical_energy_use_intensity
+                    },
                     max_living_room_overheating=max_living_room_overheating,
                     max_bedroom_overheating=max_bedroom_overheating
                 )
             
-            out["F"] = objective_values  # Three objectives
+            # Ensure objective vector shape matches declared n_obj
+            out["F"] = np.array(objective_values, dtype=float)
+            if constraints_vals:
+                out["G"] = np.array(constraints_vals)
             
         except Exception as e:
             out["F"] = [1000.0, 1000.0, 1000.0]  # Three objectives
@@ -310,7 +412,10 @@ def initialize_shading_optimization(
     debug_mode=False, 
     weather_file=None, 
     overheating_criterion='CIBSE59',
-    test_mode=False
+    test_mode=True,
+    active_elements=None,
+    objectives=None,
+    constraints=None
 ):
     """Initialize the shading optimization problem and parallel processing setup."""
     
@@ -341,7 +446,10 @@ def initialize_shading_optimization(
         shared_cache=shared_cache,
         weather_file=weather_file,
         overheating_criterion=overheating_criterion,
-        test_mode=test_mode
+        test_mode=test_mode,
+        active_elements=active_elements,
+        objectives=objectives,
+        constraints=constraints
     )
     
     print("Shading optimization problem initialized:")
@@ -394,6 +502,16 @@ def run_shading_optimization(
         print_optimization_parameters(params_dict, 'NSGA-II with Binary Operators')
 
         # Create callback
+        # Prepare objective names and flags for downstream outputs
+        obj_key_to_name = {
+            'meui': 'Mechanical_Energy_Use_Intensity',
+            'max_living_room_overheating': 'Max_Living_Room_Overheating',
+            'max_bedroom_overheating': 'Max_Bedroom_Overheating'
+        }
+
+        objective_names = [obj_key_to_name.get(k, k) for k in getattr(problem, 'objectives', [])]
+        multiobjective = len(objective_names) > 1
+
         metadata = {
             'Algorithm': 'NSGA-II Binary',
             'Weather_File': problem.weather_file,
@@ -401,7 +519,10 @@ def run_shading_optimization(
             'Population_Size': population_size,
             'Crossover_Probability': crossover_prob,
             'Mutation_Probability': mutation_prob,
-            'Seed': seed
+            'Seed': seed,
+            'active_elements': getattr(problem, 'active_elements', []),
+            'objective_names': objective_names,
+            'multiobjective': multiobjective
         }
         callback = ShadingOptimizationCallback(
             shared_cache=shared_cache,
@@ -440,7 +561,12 @@ if __name__ == "__main__":
         debug_mode=True,
         weather_file="Vancouver - 2021 AMY.epw",
         overheating_criterion='CIBSE59',
-        test_mode = False # Enable test mode for quick testing
+        test_mode = False, # Enable test mode for quick testing
+        objectives=['meui', 'max_living_room_overheating', 'max_bedroom_overheating'],
+        constraints={
+            'max_living_room_overheating': 110,
+            'max_bedroom_overheating': 32
+        }
     )
     
     print("\nShading optimization problem initialized successfully!")
@@ -451,10 +577,10 @@ if __name__ == "__main__":
             problem=problem,
             pool=pool,
             shared_cache=shared_cache,
-            n_generations=100,  # Small number for testing
-            population_size=60,   # Small population for testing
+            n_generations=2,  # Small number for testing
+            population_size=8,   # Small population for testing
             crossover_prob=1,
-            mutation_prob=0.02,
+            mutation_prob=0.5,
             seed=None,  # Will generate seed automatically
         )
         

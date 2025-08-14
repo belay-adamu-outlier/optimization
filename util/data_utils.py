@@ -20,6 +20,44 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 plt.ion()  # Enable interactive mode globally
 
+
+def get_facade_orientation(element_name):
+    """
+    Determine the facade orientation from an element name.
+    
+    Args:
+        element_name (str): Name of the shading element
+        
+    Returns:
+        str: Facade orientation ('south', 'west', 'east', 'north', or 'other')
+    """
+    name = element_name.lower()
+    if name.startswith('south_'):
+        return 'south'
+    if name.startswith('west_'):
+        return 'west'
+    if name.startswith('east_'):
+        return 'east'
+    if name.startswith('north_'):
+        return 'north'
+    return 'other'
+
+
+def get_facades_present(active_elements):
+    """
+    Get list of facades present in active elements, ordered by priority.
+    
+    Args:
+        active_elements (list): List of active element names
+        
+    Returns:
+        list: Ordered list of facades present (south, west, east, north)
+    """
+    facades_order = ['south', 'west', 'east', 'north']
+    facades_present = [f for f in facades_order if any(get_facade_orientation(e) == f for e in active_elements)]
+    return facades_present
+
+
 def x_to_params(x, optimization_variables):
     """Convert optimization variables x to parameter dictionary."""
     params = {}
@@ -108,7 +146,9 @@ def print_optimization_table(
     all_solutions = list(solutions_by_key.values())
     
     # Get Pareto optimal solutions
-    pareto_solutions = [result for result in all_solutions if result['pareto_optimal']] if not constrained_analysis else []
+    pareto_solutions = []
+    if not constrained_analysis:
+        pareto_solutions = [result for result in all_solutions if result.get('pareto_optimal', False)]
     
     # Get last 100 iterations (or all if less than 100)
     last_100 = all_solutions[-100:] if len(all_solutions) > 100 else all_solutions
@@ -130,7 +170,7 @@ def print_optimization_table(
     # Print filtered results
     for result in solutions_to_show:
         if not constrained_analysis:
-            pareto_mark = "✓" if result['pareto_optimal'] else " "
+            pareto_mark = "✓" if result.get('pareto_optimal', False) else " "
         
         line_parts = [
             f"{result.get('generation') or 0:<3}",
@@ -239,16 +279,29 @@ def initialize_csv(
     variable_names=None,
     problem_type='envelope',
     constrained_analysis=False,
-    overheating_criterion='ASHRAE'
+    overheating_criterion='ASHRAE',
+    objective_names=None,
+    multiobjective=True
 ):
-    """Initialize CSV headers for envelope or shading."""
+    """Initialize CSV headers for envelope or shading.
+
+    objective_names: list of objective column names (for shading).
+    multiobjective: include Pareto column only if True.
+    """
     with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
         csvfile.write('# Optimization Metadata\n')
         for key, value in (metadata or {}).items():
             csvfile.write('# %s: %s\n' % (key, value))
         csvfile.write('#\n')
 
-        fieldnames = _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion)
+        fieldnames = _csv_fieldnames(
+            problem_type,
+            variable_names,
+            constrained_analysis,
+            overheating_criterion,
+            objective_names=objective_names,
+            multiobjective=multiobjective
+        )
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
@@ -273,17 +326,40 @@ def _objective_headers(problem_type, constrained_analysis, overheating_criterion
     return ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours']
 
 
-def _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion):
+def _csv_fieldnames(
+    problem_type,
+    variable_names,
+    constrained_analysis,
+    overheating_criterion,
+    objective_names=None,
+    multiobjective=True
+):
     base = ['Generation', 'Iteration']
     objectives = _objective_headers(problem_type, constrained_analysis, overheating_criterion)
     if problem_type == 'shading':
-        return base + ['Shading_Schedule'] + objectives + ['Pareto_Optimal']
+        # Use provided objective names if given; fall back to defaults
+        objs = objective_names or [
+            'Mechanical_Energy_Use_Intensity',
+            'Max_Living_Room_Overheating',
+            'Max_Bedroom_Overheating'
+        ]
+        tail = ['Pareto_Optimal'] if multiobjective else []
+        return base + ['Shading_Schedule'] + objs + tail
     vars_part = variable_names or []
     tail = [] if constrained_analysis else ['Pareto_Optimal']
     return base + vars_part + objectives + tail
 
 
-def _format_row(problem_type, result, variable_names, constrained_analysis, overheating_criterion, mode='run'):
+def _format_row(
+    problem_type,
+    result,
+    variable_names,
+    constrained_analysis,
+    overheating_criterion,
+    mode='run',
+    objective_names=None,
+    multiobjective=True
+):
     # mode: 'run' (during optimization) or 'final' (after Pareto marking)
     row = {
         'Generation': result.get('generation') or 0,
@@ -293,10 +369,27 @@ def _format_row(problem_type, result, variable_names, constrained_analysis, over
     if problem_type == 'shading':
         schedule_str = ''.join('1' if v == 1 else '0' for v in result.get('shading_schedule', []))
         row['Shading_Schedule'] = schedule_str
-        row['Mechanical_Energy_Use_Intensity'] = '%.6f' % result.get('mechanical_energy_use_intensity', 0.0)
-        row['Max_Living_Room_Overheating'] = '%.3f' % result.get('max_living_room_overheating', 0.0)
-        row['Max_Bedroom_Overheating'] = '%.3f' % result.get('max_bedroom_overheating', 0.0)
-        row['Pareto_Optimal'] = '' if mode == 'run' else ('Yes' if result.get('pareto_optimal', False) else 'No')
+        # Write objectives in provided order
+        names = objective_names or [
+            'Mechanical_Energy_Use_Intensity',
+            'Max_Living_Room_Overheating',
+            'Max_Bedroom_Overheating'
+        ]
+        for name in names:
+            val = result.get(name.lower(), None)
+            if val is None:
+                # try canonical keys used in code
+                val = result.get('mechanical_energy_use_intensity' if 'Mechanical' in name else (
+                    'max_living_room_overheating' if 'Living' in name else 'max_bedroom_overheating'
+                ), 0.0)
+            # format
+            if 'Mechanical' in name:
+                row[name] = '%.6f' % float(val)
+            else:
+                row[name] = '%.3f' % float(val)
+        if multiobjective:
+            row['Pareto_Optimal'] = '' if mode == 'run' else (
+                'Yes' if result.get('pareto_optimal', False) else 'No')
         return row
 
     # envelope
@@ -329,18 +422,36 @@ def save_to_csv(
     generation,
     problem_type='envelope',
     constrained_analysis=False,
-    overheating_criterion='ASHRAE'
+    overheating_criterion='ASHRAE',
+    objective_names=None,
+    multiobjective=True
 ):
     """General CSV save function that works for both envelope and shading problems."""
     if generation not in solutions_by_generation:
         return
 
-    fieldnames = _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion)
+    fieldnames = _csv_fieldnames(
+        problem_type,
+        variable_names,
+        constrained_analysis,
+        overheating_criterion,
+        objective_names=objective_names,
+        multiobjective=multiobjective
+    )
     with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         for combination_key in solutions_by_generation[generation]:
             result = solutions_by_key[combination_key]
-            row = _format_row(problem_type, result, variable_names, constrained_analysis, overheating_criterion, mode='run')
+            row = _format_row(
+                problem_type,
+                result,
+                variable_names,
+                constrained_analysis,
+                overheating_criterion,
+                mode='run',
+                objective_names=objective_names,
+                multiobjective=multiobjective
+            )
             writer.writerow(row)
 
 
@@ -351,7 +462,9 @@ def save_final_results(
     metadata, 
     problem_type='envelope',
     constrained_analysis=False,
-    overheating_criterion='ASHRAE'
+    overheating_criterion='ASHRAE',
+    objective_names=None,
+    multiobjective=True
 ):
     """General final results save function."""
     all_solutions = list(solutions_by_key.values())
@@ -359,14 +472,21 @@ def save_final_results(
         return
 
     # Calculate Pareto optimality for unconstrained problems
-    if not constrained_analysis:
+    if not constrained_analysis and multiobjective:
         if problem_type == 'shading':
+            # Use the selected objective names to build F in order
+            names = objective_names or [
+                'Mechanical_Energy_Use_Intensity',
+                'Max_Living_Room_Overheating',
+                'Max_Bedroom_Overheating'
+            ]
+            key_map = {
+                'Mechanical_Energy_Use_Intensity': 'mechanical_energy_use_intensity',
+                'Max_Living_Room_Overheating': 'max_living_room_overheating',
+                'Max_Bedroom_Overheating': 'max_bedroom_overheating'
+            }
             F = np.array([
-                [
-                    s.get('mechanical_energy_use_intensity', 0.0),
-                    s.get('max_living_room_overheating', 0.0),
-                    s.get('max_bedroom_overheating', 0.0),
-                ]
+                [s.get(key_map.get(name, name), 0.0) for name in names]
                 for s in all_solutions
             ])
         else:
@@ -396,12 +516,28 @@ def save_final_results(
             csvfile.write('# %s: %s\n' % (key, value))
         csvfile.write('#\n')
 
-        fieldnames = _csv_fieldnames(problem_type, variable_names, constrained_analysis, overheating_criterion)
+        fieldnames = _csv_fieldnames(
+            problem_type,
+            variable_names,
+            constrained_analysis,
+            overheating_criterion,
+            objective_names=objective_names,
+            multiobjective=multiobjective
+        )
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
 
         for s in all_solutions:
-            row = _format_row(problem_type, s, variable_names, constrained_analysis, overheating_criterion, mode='final')
+            row = _format_row(
+                problem_type,
+                s,
+                variable_names,
+                constrained_analysis,
+                overheating_criterion,
+                mode='final',
+                objective_names=objective_names,
+                multiobjective=multiobjective
+            )
             writer.writerow(row)
 
     print("\nOptimization complete! Results saved to: %s" % csv_filename)
@@ -410,16 +546,14 @@ def save_final_results(
 
 
 def initialize_plots():
-    """Initialize the two plots that will be updated during optimization."""
-    # Create two figures with specific names for identification
-    heatmap_fig = plt.figure('Shading Strategy', figsize=(10, 12))
+    """Initialize plots used during optimization.
+
+    Only the evolution plot is created here. The heatmap figure is managed
+    elsewhere to avoid duplicate/overlapping axes and spacing issues.
+    """
+    # Evolution figure
     evolution_fig = plt.figure('Evolution', figsize=(8, 10))
-    
-    # Clear any existing content
-    heatmap_fig.clear()
     evolution_fig.clear()
-    
-    # Create axes for evolution plot
     evolution_axes = evolution_fig.subplots(3, 1)
     evolution_fig.suptitle('Evolution of Solutions', fontsize=14)
     
@@ -434,89 +568,137 @@ def initialize_plots():
     evolution_axes[2].set_xlabel('Generation')
     evolution_axes[2].grid(True)
     
-    # Create axes for heatmap
-    heatmap_axes = heatmap_fig.subplots(3, 2)
-    heatmap_fig.suptitle('Shading Strategy (Minimizing Total Overheating Hours)', fontsize=16, y=0.95)
-    
-    # Show the figures
-    heatmap_fig.show()
     evolution_fig.show()
     
-    return heatmap_fig, heatmap_axes, evolution_fig, evolution_axes
+    # Return placeholders for heatmap (managed by the callback)
+    return None, None, evolution_fig, evolution_axes
 
 
-def plot_shading_heat_map(best_solution, fig=None, axes=None):
+def plot_shading_heat_map(schedule_flat, active_elements=None, fig=None, axes=None):
     """
-    Plot and display the best shading strategy as a heatmap for each shading element.
+    Plot and display shading strategy as a heatmap for each shading element.
     Updates the display in real-time during optimization.
     
     Args:
-        best_solution: List of 144 binary values representing the best shading strategy
+        schedule_flat: List of binary values representing the shading strategy
+        active_elements: List of element names in order (if None, uses default 6 elements)
         fig: Figure to update (if None, creates new figure)
         axes: Axes to update (if None, creates new axes)
     """
     if fig is None or axes is None:
         return
     
+    # Use default elements if none provided (for backward compatibility)
+    if active_elements is None:
+        active_elements = [
+            'south_overhang', 'south_fin',
+            'west_overhang', 'west_fin',
+            'east_overhang', 'east_fin'
+        ]
+    
     # Define labels
-    shading_elements = [
-        'South Overhang', 'South Fin',
-        'West Overhang', 'West Fin',
-        'East Overhang', 'East Fin'
-    ]
     seasons = ['Summer', 'Spring', 'Winter', 'Fall']
     time_periods = [
         '6-8am', '8-10am', '10am-12pm',
         '12-2pm', '2-4pm', '4-6pm'
     ]
     
-    # Plot each shading element
-    for idx, (ax, element) in enumerate(zip(axes.flatten(), shading_elements)):
-        # Clear the axis
-        ax.clear()
+    # Group elements by facade and pair overhang/fin side-by-side per row
+    facade_to_elements = {}
+    for i, name in enumerate(active_elements):
+        facade_to_elements.setdefault(get_facade_orientation(name), []).append((i, name))
+    
+    ordered_facades = get_facades_present(active_elements)
+    row = 0
+    
+    for f in ordered_facades:
+        elems = facade_to_elements[f]
+        # ensure overhang first, then fin if both exist
+        elems_sorted = sorted(elems, key=lambda t: (0 if 'overhang' in t[1] else 1, t[1]))
         
-        # Extract data for this element (24 values: 4 seasons × 6 time periods)
-        start_idx = idx * 24
-        element_data = best_solution[start_idx:start_idx + 24]
-        
-        # Reshape into 4×6 matrix (seasons × time periods)
-        data_matrix = np.array(element_data).reshape(4, 6)
-        
-        # Create heatmap
-        sns.heatmap(
-            data_matrix,
-            ax=ax,
-            cmap='RdYlBu_r',  # Red for shading deployed, white for retracted
-            cbar=False,
-            xticklabels=time_periods,
-            yticklabels=seasons,
-            linewidths=0.5,
-            linecolor='gray',
-            square=True,
-            annot=True,  # Show values in cells
-            fmt='d',     # Integer format for annotations
-            cbar_kws={'label': 'Shading Deployed'}
-        )
-        
-        # Customize subplot
-        ax.set_title(element, pad=10)
-        ax.set_ylabel('Season')
-        
-        # Only show x-axis labels and title for bottom two subplots (indices 4 and 5)
-        if idx in [4, 5]:
-            ax.set_xlabel('Time of Day')
-            ax.set_xticklabels(time_periods, rotation=45, ha='right')
-        else:
-            ax.set_xticklabels([])
+        for col in range(2):
+            ax_idx = row*2 + col
+            ax = axes[ax_idx] if ax_idx < len(axes) else None
+            if ax is None:
+                continue
+                
+            ax.clear()
+            
+            # Hide spines for a cleaner heatmap look
+            try:
+                for spine in ax.spines.values():
+                    spine.set_visible(False)
+            except Exception:
+                pass
+                
+            if col < len(elems_sorted):
+                elem_idx, elem_name = elems_sorted[col]
+                start = elem_idx * 24
+                block = (schedule_flat[start:start + 24] or [])
+                if len(block) < 24:
+                    block = (block + [0] * 24)[:24]
+                    
+                matrix = [block[0:6], block[6:12], block[12:18], block[18:24]]
+                data = np.array(matrix)
+                
+                # Create heatmap
+                sns.heatmap(
+                    data,
+                    ax=ax,
+                    cmap='RdYlBu_r',  # Red for shading deployed, white for retracted
+                    cbar=False,
+                    xticklabels=time_periods if row == len(ordered_facades)-1 else ['']*6,
+                    yticklabels=seasons,
+                    linewidths=0.5,
+                    linecolor='gray',
+                    square=True,
+                    annot=True,  # Show values in cells
+                    fmt='d',     # Integer format for annotations
+                )
+                
+                # Remove auto tick marks and numeric scales
+                from matplotlib.ticker import FixedLocator
+                ax.tick_params(axis='both', which='both', length=0, labelsize=9)
+                
+                # Center labels in cells; suppress numeric ticks
+                ax.yaxis.set_major_locator(FixedLocator(np.arange(4) + 0.5))
+                if row == len(ordered_facades)-1:
+                    ax.xaxis.set_major_locator(FixedLocator(np.arange(6) + 0.5))
+                else:
+                    ax.xaxis.set_major_locator(FixedLocator([]))
+                
+                # Place titles above axes with sufficient padding
+                ax.set_title(
+                    elem_name.replace('_',' ').title(),
+                    pad=8,
+                    fontsize=11
+                )
+                ax.set_xlabel('Time of Day' if row == len(ordered_facades)-1 else '')
+                ax.set_ylabel('Season')
+            else:
+                ax.set_visible(False)
+        row += 1
+    
+    # Hide any extra axes beyond used rows*2
+    used_axes = len(ordered_facades) * 2
+    for j in range(used_axes, len(axes)):
+        try:
+            axes[j].set_visible(False)
+        except Exception:
+            pass
     
     # Update title with more space from subplots
-    fig.suptitle('Shading Strategy (Minimizing Total Overheating Hours)', fontsize=16, y=0.98)
+    fig.suptitle('Shading Strategy (Minimizing Total Overheating Hours)', fontsize=16, y=0.97)
     
-    # Adjust layout and update display with padding for title
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    # Add generous vertical spacing between rows for titles
+    fig.subplots_adjust(top=0.90, bottom=0.10, left=0.08, right=0.98,
+                        hspace=0.28, wspace=0.12)
+    
     fig.canvas.draw()
     fig.canvas.flush_events()
-    plt.pause(0.1)  # Small pause to allow the plot to update
+    plt.pause(0.05)  # Small pause to allow the plot to update
+
+
 
 
 def plot_evolution(solutions_by_key, top_n=5, fig=None, axes=None):
@@ -599,8 +781,7 @@ def plot_evolution(solutions_by_key, top_n=5, fig=None, axes=None):
     # Update title
     fig.suptitle(f'Evolution of Top {top_n} Solutions', fontsize=14)
     
-    # Adjust layout and update display
-    plt.tight_layout()
+    # Update display (layout already handled by subplots_adjust)
     fig.canvas.draw()
     fig.canvas.flush_events()
     plt.pause(0.1)  # Small pause to allow the plot to update
@@ -675,12 +856,35 @@ def print_optimization_parameters(params_dict, algorithm_name="NSGA-II"):
     print("-" * 50)
 
 
-def print_shading_optimization_table(solutions_by_key):
-    """Print a table with all evaluated shading solutions."""
+def print_shading_optimization_table(solutions_by_key, multiobjective=True, objective_names=None):
+    """Print a table with all evaluated shading solutions.
+
+    multiobjective: if True, include Pareto column and compute it.
+    objective_names: control objective ordering in table output.
+    """
     print("\n" + "="*130)
     print("SHADING OPTIMIZATION RESULTS TABLE")
     print("="*130)
-    print(f"{'Gen':<4} {'Iter':<5} {'Shading Schedule':<50} {'MEUI':<10} {'Max_LR':<8} {'Max_BR':<8} {'Pareto':<6}")
+    
+    # Define consistent column widths
+    col_widths = {
+        'Gen': 4,
+        'Iter': 5,
+        'Shading Schedule': 50,
+        'MEUI': 10,
+        'Max_LR': 8,
+        'Max_BR': 8,
+        'Pareto': 6
+    }
+    
+    # Build header with consistent widths
+    header = f"{'Gen':<{col_widths['Gen']}} {('Iter'):<{col_widths['Iter']}} {'Shading Schedule':<{col_widths['Shading Schedule']}} "
+    names = objective_names or ['MEUI', 'Max_LR', 'Max_BR']
+    for nm in names:
+        header += f"{nm:<{col_widths.get(nm, 10)}} "
+    if multiobjective:
+        header += f"{'Pareto':<{col_widths['Pareto']}}"
+    print(header)
     print("-"*130)
     
     # Get all solutions as a list for processing
@@ -688,34 +892,39 @@ def print_shading_optimization_table(solutions_by_key):
     for combination_key, solution in solutions_by_key.items():
         all_solutions.append(solution)
     
-    # Calculate Pareto optimality
-    objectives = np.array([[s['mechanical_energy_use_intensity'], 
-                          s['max_living_room_overheating'],
-                          s['max_bedroom_overheating']] for s in all_solutions])
-    pareto_mask = np.ones(len(objectives), dtype=bool)
-    
-    for i in range(len(objectives)):
-        for j in range(len(objectives)):
-            if i != j:
-                # Check if solution j dominates solution i
-                if np.all(objectives[j] <= objectives[i]) and np.any(objectives[j] < objectives[i]):
-                    pareto_mask[i] = False
-                    break
-    
-    # Mark Pareto optimality in solutions
-    for solution, is_pareto in zip(all_solutions, pareto_mask):
-        solution['pareto_optimal'] = is_pareto
+    # Calculate Pareto optimality if requested
+    if multiobjective:
+        key_map = {
+            'MEUI': 'mechanical_energy_use_intensity',
+            'Max_LR': 'max_living_room_overheating',
+            'Max_BR': 'max_bedroom_overheating'
+        }
+        keys = [key_map.get(n, n) for n in names]
+        objectives = np.array([[s.get(k, 0.0) for k in keys] for s in all_solutions])
+        pareto_mask = np.ones(len(objectives), dtype=bool)
+        for i in range(len(objectives)):
+            for j in range(len(objectives)):
+                if i != j:
+                    if np.all(objectives[j] <= objectives[i]) and np.any(objectives[j] < objectives[i]):
+                        pareto_mask[i] = False
+                        break
+        for solution, is_pareto in zip(all_solutions, pareto_mask):
+            solution['pareto_optimal'] = is_pareto
     
     # Get Pareto optimal solutions
-    pareto_solutions = [s for s in all_solutions if s['pareto_optimal']]
-    
-    # Get last 100 non-Pareto solutions
-    non_pareto_solutions = [s for s in all_solutions if not s['pareto_optimal']]
+    if multiobjective:
+        pareto_solutions = [s for s in all_solutions if s['pareto_optimal']]
+        # Get last 100 non-Pareto solutions
+        non_pareto_solutions = [s for s in all_solutions if not s['pareto_optimal']]
+    else:
+        # For single objective, all solutions are effectively "optimal"
+        pareto_solutions = []
+        non_pareto_solutions = all_solutions
     last_100_non_pareto = sorted(non_pareto_solutions, 
                                 key=lambda x: (x['generation'], x['iteration']))[-100:]
     
     # Print Pareto optimal solutions first
-    if pareto_solutions:
+    if multiobjective and pareto_solutions:
         print("PARETO OPTIMAL SOLUTIONS:")
         for solution in sorted(pareto_solutions, key=lambda x: (x['generation'], x['iteration'])):
             gen = solution['generation']
@@ -731,7 +940,9 @@ def print_shading_optimization_table(solutions_by_key):
                 schedule_str += "..."
             
             # Use ASCII to avoid Windows console encoding issues
-            print(f"{gen:<4} {iteration:<5} {schedule_str:<50} {meui:<10.2f} {max_lr:<8.1f} {max_br:<8.1f} {'Yes':<6}")
+            row = f"{gen:<{col_widths['Gen']}} {iteration:<{col_widths['Iter']}} {schedule_str:<{col_widths['Shading Schedule']}} {meui:<{col_widths['MEUI']}.2f} {max_lr:<{col_widths['Max_LR']}.1f} {max_br:<{col_widths['Max_BR']}.1f}"
+            row += f" {'Yes':<{col_widths['Pareto']}}"
+            print(row)
         
         print("-"*130)
     
@@ -751,7 +962,10 @@ def print_shading_optimization_table(solutions_by_key):
             if len(shading_schedule) > 20:
                 schedule_str += "..."
             
-            print(f"{gen:<4} {iteration:<5} {schedule_str:<50} {meui:<10.2f} {max_lr:<8.1f} {max_br:<8.1f} {' ':<6}")
+            row = f"{gen:<{col_widths['Gen']}} {iteration:<{col_widths['Iter']}} {schedule_str:<{col_widths['Shading Schedule']}} {meui:<{col_widths['MEUI']}.2f} {max_lr:<{col_widths['Max_LR']}.1f} {max_br:<{col_widths['Max_BR']}.1f}"
+            if multiobjective:
+                row += f" {' ':<{col_widths['Pareto']}}"
+            print(row)
     
     print("-"*130)
     
@@ -773,3 +987,52 @@ def load_config():
         return sample
     with open(config_path, 'r') as f:
         return json.load(f)
+
+
+def initialize_shading_heatmap(active_elements, figsize=(10, 2.9)):
+    """
+    Initialize a heatmap figure and axes for shading optimization visualization.
+    
+    Args:
+        active_elements (list): List of active element names
+        figsize (tuple): Base figure size, will be adjusted based on number of facades
+        
+    Returns:
+        tuple: (figure, axes_list, facades_present)
+    """
+    from util.data_utils import get_facades_present
+    
+    # Get facades present and determine layout
+    facades_present = get_facades_present(active_elements)
+    rows = max(1, len(facades_present))
+    cols = 2
+    
+    # Create figure with appropriate size
+    fig = plt.figure('Shading Strategy', figsize=(figsize[0], figsize[1] * rows))
+    
+    # Create subplots
+    ax_obj = fig.subplots(
+        rows,
+        cols,
+        gridspec_kw={'hspace': 0.05, 'wspace': 0.12}
+    )
+    
+    # Fine tune spacing to remove large gap between rows while
+    # preserving room for the bottom x labels and left y labels
+    fig.subplots_adjust(
+        top=0.90, bottom=0.10, left=0.08, right=0.98,
+        hspace=0.28, wspace=0.12
+    )
+    
+    # Normalize axes to a flat list
+    if isinstance(ax_obj, np.ndarray):
+        axes = list(ax_obj.ravel())
+    else:
+        axes = [ax_obj]
+    
+    return fig, axes, facades_present
+
+
+if __name__ == '__main__':
+    import pytest
+    pytest.main([__file__])

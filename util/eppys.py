@@ -9,7 +9,7 @@ from .energyplus_utils import (
 def main():
     """Quick manual test for shading rename/schedule assignment."""
     IDF.setiddname('C:/EnergyPlusV9-4-0/Energy+.idd')
-    idf = IDF('Building_Shading_cleaned_specific_synced.idf', 'Vancouver - 2021 AMY.epw')
+    idf = IDF('Building_SW_Shading.idf', 'Vancouver - 2021 AMY.epw')
 
     # Rename shading elements by orientation and type
     renamed = rename_shading_elements_by_orientation(idf)
@@ -18,10 +18,15 @@ def main():
     # Assign schedules per orientation/type (skip north as required)
     assigned = assign_shading_transmittance_schedules(idf)
     import random
-    schedule = [random.randint(0, 1) for _ in range(144)]
+    schedule = [random.randint(0, 1) for _ in range(24)]
     
-    idf =apply_shading_schedules_to_idf(idf, schedule)
-    idf.saveas('Building_Shading_Renamed.idf')
+    idf =apply_shading_schedules_to_idf(idf, {
+        'south_overhang': schedule,
+        'south_fin': schedule,
+        'west_overhang': schedule,
+        'west_fin': schedule,
+    })
+    idf.saveas('Building_SW_Shading_Renamed.idf')
     print('Assigned schedules: %d' % assigned)
 
     # Show a small sample for verification
