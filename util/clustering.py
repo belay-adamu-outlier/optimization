@@ -13,7 +13,7 @@ def run_clustering_analysis():
         print("Warning: optimization_results_20250715_164420.csv not found. Clustering analysis requires this file.")
         return
 
-    # filter out rows where MEUI is greater than 15
+    # filter out rows where TEDI is greater than 15
     sim_data = sim_data[sim_data.iloc[:,-3] <= 15]
 
     # Load window data

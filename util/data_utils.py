@@ -199,13 +199,13 @@ def print_optimization_table(
         
         if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
             line_parts.extend([
-                f"{result['mechanical_energy_use_intensity']:<8.3f}",
+                f"{result['thermal_energy_demand_intensity']:<8.3f}",
                 f"{result.get('max_living_room_overheating', 0.0):<12.1f}",
                 f"{result.get('max_bedroom_overheating', 0.0):<12.1f}"
             ])
         else:
             line_parts.extend([
-                f"{result['mechanical_energy_use_intensity']:<8.3f}",
+                f"{result['thermal_energy_demand_intensity']:<8.3f}",
                 f"{result['average_overheating_hours']:<8.1f}",
                 f"{pareto_mark:<10} " if not constrained_analysis else f"{result['max_overheating_hours']:<8.1f}"
             ])
@@ -311,19 +311,19 @@ def initialize_csv(
 def _objective_headers(problem_type, constrained_analysis, overheating_criterion):
     if problem_type == 'shading':
         return [
-            'Mechanical_Energy_Use_Intensity',
+            'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating'
         ]
     if constrained_analysis:
         if overheating_criterion.upper() == 'CIBSE59':
             return [
-                'Mechanical_Energy_Use_Intensity',
+                'Thermal_Energy_Demand_Intensity',
                 'Max_Living_Room_Overheating',
                 'Max_Bedroom_Overheating'
             ]
-        return ['Mechanical_Energy_Use_Intensity', 'Max_Overheating_Hours']
-    return ['Mechanical_Energy_Use_Intensity', 'Average_Overheating_Hours']
+        return ['Thermal_Energy_Demand_Intensity', 'Max_Overheating_Hours']
+    return ['Thermal_Energy_Demand_Intensity', 'Average_Overheating_Hours']
 
 
 def _csv_fieldnames(
@@ -337,10 +337,10 @@ def _csv_fieldnames(
     base = ['Generation', 'Iteration']
     objectives = _objective_headers(problem_type, constrained_analysis, overheating_criterion)
     if problem_type == 'shading':
-        # For shading problems, always include all three columns (MEUI + both overheating)
+        # For shading problems, always include all three columns (TEDI + both overheating)
         # The objective_names parameter only controls which objectives are optimized, not which columns are displayed
         objs = [
-            'Mechanical_Energy_Use_Intensity',
+            'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating'
         ]
@@ -373,7 +373,7 @@ def _format_row(
         # For shading problems, always write all three columns regardless of objective_names
         # objective_names only controls which objectives are optimized, not which columns are displayed
         names = [
-            'Mechanical_Energy_Use_Intensity',
+            'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating'
         ]
@@ -381,7 +381,7 @@ def _format_row(
             val = result.get(name.lower(), None)
             if val is None:
                 # try canonical keys used in code
-                val = result.get('mechanical_energy_use_intensity' if 'Mechanical' in name else (
+                val = result.get('thermal_energy_demand_intensity' if 'Mechanical' in name else (
                     'max_living_room_overheating' if 'Living' in name else 'max_bedroom_overheating'
                 ), 0.0)
             # format
@@ -400,7 +400,7 @@ def _format_row(
             if var_name in result:
                 row[var_name] = result[var_name]
 
-    row['Mechanical_Energy_Use_Intensity'] = '%.4f' % result.get('mechanical_energy_use_intensity', 0.0)
+    row['Thermal_Energy_Demand_Intensity'] = '%.4f' % result.get('thermal_energy_demand_intensity', 0.0)
 
     if constrained_analysis:
         if overheating_criterion.upper() == 'CIBSE59':
@@ -478,12 +478,12 @@ def save_final_results(
         if problem_type == 'shading':
             # Use the selected objective names to build F in order
             names = objective_names or [
-                'Mechanical_Energy_Use_Intensity',
+                'Thermal_Energy_Demand_Intensity',
                 'Max_Living_Room_Overheating',
                 'Max_Bedroom_Overheating'
             ]
             key_map = {
-                'Mechanical_Energy_Use_Intensity': 'mechanical_energy_use_intensity',
+                'Thermal_Energy_Demand_Intensity': 'thermal_energy_demand_intensity',
                 'Max_Living_Room_Overheating': 'max_living_room_overheating',
                 'Max_Bedroom_Overheating': 'max_bedroom_overheating'
             }
@@ -494,7 +494,7 @@ def save_final_results(
         else:
             F = np.array([
                 [
-                    s.get('mechanical_energy_use_intensity', 0.0),
+                    s.get('thermal_energy_demand_intensity', 0.0),
                     s.get('average_overheating_hours', 0.0)
                 ]
                 for s in all_solutions
@@ -560,7 +560,7 @@ def initialize_plots():
     evolution_fig.suptitle('Evolution of Solutions', fontsize=14)
     
     # Set up evolution plot axes
-    evolution_axes[0].set_ylabel('MEUI (kWh/m²)')
+    evolution_axes[0].set_ylabel('TEDI (kWh/m²)')
     evolution_axes[0].grid(True)
     
     evolution_axes[1].set_ylabel('Living Room Overheating (hrs)')
@@ -599,7 +599,7 @@ def plot_shading_heat_map(schedule_flat, active_elements=None, fig=None, axes=No
         ]
     
     # Define labels
-    seasons = ['Summer', 'Spring', 'Winter', 'Fall']
+    seasons = ['Spring', 'Summer', 'Fall', 'Winter']
     time_periods = [
         '6-8am', '8-10am', '10am-12pm',
         '12-2pm', '2-4pm', '4-6pm'
@@ -734,18 +734,18 @@ def plot_evolution(solutions_by_key, top_n=5, fig=None, axes=None):
     for ax in axes:
         ax.clear()
     
-    # Plot MEUI evolution (use markers so single-generation results are visible)
-    avg_meui = [np.mean([s['mechanical_energy_use_intensity']
+    # Plot TEDI evolution (use markers so single-generation results are visible)
+    avg_tedi = [np.mean([s['thermal_energy_demand_intensity']
                          for s in solutions_by_gen[gen][:top_n]])
                 for gen in generations]
-    best_meui = [min([s['mechanical_energy_use_intensity']
+    best_tedi = [min([s['thermal_energy_demand_intensity']
                       for s in solutions_by_gen[gen]])
                  for gen in generations]
-    axes[0].plot(generations, avg_meui, color='b', linestyle='-', marker='o',
+    axes[0].plot(generations, avg_tedi, color='b', linestyle='-', marker='o',
                  label=f'Avg Top {top_n}')
-    axes[0].plot(generations, best_meui, color='b', linestyle='--', marker='o',
+    axes[0].plot(generations, best_tedi, color='b', linestyle='--', marker='o',
                  label='Best')
-    axes[0].set_ylabel('MEUI (kWh/m²)')
+    axes[0].set_ylabel('TEDI (kWh/m²)')
     axes[0].legend()
     axes[0].grid(True)
     
@@ -816,15 +816,15 @@ def generate_dummy_shading_results(shading_schedule):
     
     # Generate realistic dummy results
     # More shading (higher ratio) should generally reduce overheating but may increase energy use
-    base_meui = 80.0  # Base mechanical energy use intensity
+    base_tedi = 80.0  # Base mechanical energy use intensity
     base_overheating = 25.0  # Base overheating hours
     
     # Adjust based on shading schedule
-    meui_variation = random.uniform(-10, 15)  # Random variation
+    tedi_variation = random.uniform(-10, 15)  # Random variation
     overheating_variation = random.uniform(-8, 5)  # Random variation
     
     # Shading effect: more shading reduces overheating but may slightly increase energy use
-    meui = base_meui + meui_variation + (shading_ratio * 20)  # More shading = slightly higher energy use
+    tedi = base_tedi + tedi_variation + (shading_ratio * 20)  # More shading = slightly higher energy use
     average_overheating = max(0, base_overheating + overheating_variation - (shading_ratio * 15))  # More shading = less overheating
     
     # CIBSE59 specific values
@@ -833,7 +833,7 @@ def generate_dummy_shading_results(shading_schedule):
     
     return {
         'success': True,
-        'district_heating_kwh': meui * 2590.29,  # Convert back to kWh
+        'district_heating_kwh': tedi * 2590.29,  # Convert back to kWh
         'average_overheating_hours': average_overheating,
         'max_living_room_overheating': max_living_room_overheating,
         'max_bedroom_overheating': max_bedroom_overheating
@@ -873,7 +873,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
         'Gen': 4,
         'Iter': 5,
         'Shading Schedule': 50,
-        'MEUI': 10,
+        'TEDI': 10,
         'Max_LR': 8,
         'Max_BR': 8,
         'Pareto': 6
@@ -881,7 +881,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
     
     # Build header with consistent widths
     header = f"{'Gen':<{col_widths['Gen']}} {('Iter'):<{col_widths['Iter']}} {'Shading Schedule':<{col_widths['Shading Schedule']}} "
-    names = objective_names or ['MEUI', 'Max_LR', 'Max_BR']
+    names = objective_names or ['TEDI', 'Max_LR', 'Max_BR']
     for nm in names:
         header += f"{nm:<{col_widths.get(nm, 10)}} "
     if multiobjective:
@@ -897,7 +897,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
     # Calculate Pareto optimality if requested
     if multiobjective:
         key_map = {
-            'MEUI': 'mechanical_energy_use_intensity',
+            'TEDI': 'thermal_energy_demand_intensity',
             'Max_LR': 'max_living_room_overheating',
             'Max_BR': 'max_bedroom_overheating'
         }
@@ -932,7 +932,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
             gen = solution['generation']
             iteration = solution['iteration']
             shading_schedule = solution['shading_schedule']
-            meui = solution['mechanical_energy_use_intensity']
+            tedi = solution['thermal_energy_demand_intensity']
             max_lr = solution['max_living_room_overheating']
             max_br = solution['max_bedroom_overheating']
             
@@ -942,7 +942,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
                 schedule_str += "..."
             
             # Use ASCII to avoid Windows console encoding issues
-            row = f"{gen:<{col_widths['Gen']}} {iteration:<{col_widths['Iter']}} {schedule_str:<{col_widths['Shading Schedule']}} {meui:<{col_widths['MEUI']}.2f} {max_lr:<{col_widths['Max_LR']}.1f} {max_br:<{col_widths['Max_BR']}.1f}"
+            row = f"{gen:<{col_widths['Gen']}} {iteration:<{col_widths['Iter']}} {schedule_str:<{col_widths['Shading Schedule']}} {tedi:<{col_widths['TEDI']}.2f} {max_lr:<{col_widths['Max_LR']}.1f} {max_br:<{col_widths['Max_BR']}.1f}"
             row += f" {'Yes':<{col_widths['Pareto']}}"
             print(row)
         
@@ -955,7 +955,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
             gen = solution['generation']
             iteration = solution['iteration']
             shading_schedule = solution['shading_schedule']
-            meui = solution['mechanical_energy_use_intensity']
+            tedi = solution['thermal_energy_demand_intensity']
             max_lr = solution['max_living_room_overheating']
             max_br = solution['max_bedroom_overheating']
             
@@ -964,7 +964,7 @@ def print_shading_optimization_table(solutions_by_key, multiobjective=True, obje
             if len(shading_schedule) > 20:
                 schedule_str += "..."
             
-            row = f"{gen:<{col_widths['Gen']}} {iteration:<{col_widths['Iter']}} {schedule_str:<{col_widths['Shading Schedule']}} {meui:<{col_widths['MEUI']}.2f} {max_lr:<{col_widths['Max_LR']}.1f} {max_br:<{col_widths['Max_BR']}.1f}"
+            row = f"{gen:<{col_widths['Gen']}} {iteration:<{col_widths['Iter']}} {schedule_str:<{col_widths['Shading Schedule']}} {tedi:<{col_widths['TEDI']}.2f} {max_lr:<{col_widths['Max_LR']}.1f} {max_br:<{col_widths['Max_BR']}.1f}"
             if multiobjective:
                 row += f" {' ':<{col_widths['Pareto']}}"
             print(row)

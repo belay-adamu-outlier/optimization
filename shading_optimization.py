@@ -59,7 +59,7 @@ class ShadingOptimizationCallback(Callback):
         ])
         self.enable_heatmap = self.metadata.get('enable_heatmap', True)
         self.objective_names = self.metadata.get('objective_names', [
-            'Mechanical_Energy_Use_Intensity',
+            'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating'
         ])
@@ -104,17 +104,17 @@ class ShadingOptimizationCallback(Callback):
                     iteration = i + 1
                     
                     # Support single or multi-objective by pulling from cache params
-                    meui = params.get('meui') if params else None
+                    tedi = params.get('tedi') if params else None
                     # Get overheating values from cache entry (they're stored as separate parameters)
                     max_lr_oh = cache_entry.get('max_living_room_overheating', 0.0)
                     max_br_oh = cache_entry.get('max_bedroom_overheating', 0.0)
                     
                     # Fallback to objectives if needed
-                    if meui is None:
+                    if tedi is None:
                         try:
-                            meui = objectives[0]
+                            tedi = objectives[0]
                         except Exception:
-                            meui = 0.0
+                            tedi = 0.0
                     if max_lr_oh is None or max_lr_oh == 0.0:
                         if len(objectives) >= 2:
                             max_lr_oh = objectives[1]
@@ -130,7 +130,7 @@ class ShadingOptimizationCallback(Callback):
                         'generation': generation,
                         'iteration': iteration,
                         'shading_schedule': params.get('shading_schedule', []) if params else [],
-                        'mechanical_energy_use_intensity': meui,
+                        'thermal_energy_demand_intensity': tedi,
                         'max_living_room_overheating': max_lr_oh,
                         'max_bedroom_overheating': max_br_oh
                     }
@@ -145,7 +145,7 @@ class ShadingOptimizationCallback(Callback):
             print_shading_optimization_table(
                 solutions_by_key,
                 multiobjective=self.multiobjective,
-                objective_names=['MEUI', 'Max_LR', 'Max_BR']
+                objective_names=['TEDI', 'Max_LR', 'Max_BR']
             )
 
             # Save CSV only for generations that have completed
@@ -204,17 +204,17 @@ class ShadingOptimizationCallback(Callback):
                     params = cache_entry.get('params')
                     iteration = i + 1
                     
-                    meui = params.get('meui') if params else None
+                    tedi = params.get('tedi') if params else None
                     # Get overheating values from cache entry (they're stored as separate parameters)
                     max_lr_oh = cache_entry.get('max_living_room_overheating', 0.0)
                     max_br_oh = cache_entry.get('max_bedroom_overheating', 0.0)
                     
                     # Fallback to objectives if needed
-                    if meui is None:
+                    if tedi is None:
                         try:
-                            meui = objectives[0]
+                            tedi = objectives[0]
                         except Exception:
-                            meui = 0.0
+                            tedi = 0.0
                     if max_lr_oh is None or max_lr_oh == 0.0:
                         if len(objectives) >= 2:
                             max_lr_oh = objectives[1]
@@ -230,7 +230,7 @@ class ShadingOptimizationCallback(Callback):
                         'generation': generation,
                         'iteration': iteration,
                         'shading_schedule': params.get('shading_schedule', []) if params else [],
-                        'mechanical_energy_use_intensity': meui,
+                        'thermal_energy_demand_intensity': tedi,
                         'max_living_room_overheating': max_lr_oh,
                         'max_bedroom_overheating': max_br_oh
                     }
@@ -286,8 +286,8 @@ class ShadingOptimizationProblem(ElementwiseProblem):
         n_ieq_constr = 0
             
         # Objectives handling
-        # Supported objective keys: 'meui', 'max_living_room_overheating', 'max_bedroom_overheating'
-        default_objectives = ['meui', 'max_living_room_overheating', 'max_bedroom_overheating']
+        # Supported objective keys: 'tedi', 'max_living_room_overheating', 'max_bedroom_overheating'
+        default_objectives = ['tedi', 'max_living_room_overheating', 'max_bedroom_overheating']
         self.objectives = objectives or default_objectives
         self.multiobjective = len(self.objectives) > 1
 
@@ -367,11 +367,10 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 # This is a new combination - run simulation
                 process_id = os.getpid()
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-                
                 shading_dict = build_seasonal_shading_schedules(x, element_configs)
-
+                print(f"Shading schedule: {shading_dict}")
                 output_dir = run_simulation(
-                    idf_path="Building_SW_Shading.idf",
+                    idf_path="Building_SW_2nd_Floor_Shading.idf",
                     weather_path=self.weather_file,
                     envelope_parameters= {
                         "infiltration_ach": 0.78,
@@ -391,7 +390,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                         
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
-                mechanical_energy_use_intensity = district_heating / 271.24
+                thermal_energy_demand_intensity = district_heating / 71.93
                 
                 # CIBSE59 overheating analysis
                 max_living_room_overheating = results.get('max_living_room_overheating', 0.0) or 0.0
@@ -400,7 +399,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
 
                 # Map measures for objective selection
                 measures = {
-                    'meui': mechanical_energy_use_intensity,
+                    'tedi': thermal_energy_demand_intensity,
                     'max_living_room_overheating': max_living_room_overheating,
                     'max_bedroom_overheating': max_bedroom_overheating
                 }
@@ -409,7 +408,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 # Penalty values
                 objective_values = [1000.0] * max(1, len(self.objectives))
                 # Define penalty measures explicitly so downstream code can use them
-                mechanical_energy_use_intensity = 1000.0
+                thermal_energy_demand_intensity = 1000.0
                 max_living_room_overheating = 1000.0
                 max_bedroom_overheating = 1000.0
                 max_overheating_hours = 0.0
@@ -419,12 +418,12 @@ class ShadingOptimizationProblem(ElementwiseProblem):
             constraints_vals = []
             if self.constraints:
                 bounds_map = {
-                    'meui': self.constraints.get('meui'),
+                    'tedi': self.constraints.get('tedi'),
                     'max_living_room_overheating': self.constraints.get('max_living_room_overheating'),
                     'max_bedroom_overheating': self.constraints.get('max_bedroom_overheating')
                 }
                 measures_current = {
-                    'meui': objective_values[self.objectives.index('meui')] if 'meui' in self.objectives else mechanical_energy_use_intensity,
+                    'tedi': objective_values[self.objectives.index('tedi')] if 'tedi' in self.objectives else thermal_energy_demand_intensity,
                     'max_living_room_overheating': max_living_room_overheating,
                     'max_bedroom_overheating': max_bedroom_overheating
                 }
@@ -438,6 +437,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
             full_seasonal_dict = build_seasonal_shading_schedules(shading_schedule, element_configs)
             
             # Flatten to 96 values for cache compatibility
+            # Ensure correct order: spring, summer, fall, winter for each element
             full_schedule = []
             for element in self.active_elements:
                 for season in ['spring', 'summer', 'fall', 'winter']:
@@ -454,7 +454,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                     params={
                         'shading_schedule': full_schedule,  # 96 values for callback compatibility
                         'active_elements': self.active_elements,
-                        'meui': mechanical_energy_use_intensity
+                        'tedi': thermal_energy_demand_intensity
                     },
                     max_living_room_overheating=max_living_room_overheating,
                     max_bedroom_overheating=max_bedroom_overheating
@@ -568,7 +568,7 @@ def run_shading_optimization(
         # Create callback
         # Prepare objective names and flags for downstream outputs
         obj_key_to_name = {
-            'meui': 'Mechanical_Energy_Use_Intensity',
+            'tedi': 'Thermal_Energy_Demand_Intensity',
             'max_living_room_overheating': 'Max_Living_Room_Overheating',
             'max_bedroom_overheating': 'Max_Bedroom_Overheating'
         }
@@ -626,7 +626,7 @@ if __name__ == "__main__":
         weather_file="Vancouver - 2021 AMY.epw",
         overheating_criterion='CIBSE59',
         test_mode = False, # Enable test mode for quick testing
-        objectives=['meui'],
+        objectives=['tedi'],
         constraints={
             'max_living_room_overheating': 110,
             'max_bedroom_overheating': 32
@@ -641,10 +641,10 @@ if __name__ == "__main__":
             problem=problem,
             pool=pool,
             shared_cache=shared_cache,
-            n_generations=100,  # Small number for testing
-            population_size=120,   # Small population for testing
+            n_generations=120,  # Small number for testing
+            population_size=240,   # Small population for testing
             crossover_prob=1,
-            mutation_prob=0.015,
+            mutation_prob=0.1,
             seed=None,  # Will generate seed automatically
         )
         

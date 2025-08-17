@@ -58,7 +58,7 @@ class EvaluationCallback(Callback):
         # Use dictionaries for efficient lookups instead of lists
         self.solutions_by_key = {}  # combination_key -> solution_dict
         self.solutions_by_generation = {}  # generation -> list of combination_keys
-        self.all_objectives = []  # Keep for Pareto comparison (list of [meui, overheating])
+        self.all_objectives = []  # Keep for Pareto comparison (list of [tedi, overheating])
         
         # Get variable names for flexible headers
         self.variable_names = list(optimization_variables.keys())
@@ -114,13 +114,13 @@ class EvaluationCallback(Callback):
                     iteration = i + 1
                     max_overheating_hours = cache_entry.get('max_overheating_hours')
                 
-                meui, overheating = objectives
+                tedi, overheating = objectives
                 
                 # Create solution dictionary
                 solution_dict = {
                     'generation': generation,
                     'iteration': iteration,
-                    'mechanical_energy_use_intensity': meui,
+                    'thermal_energy_demand_intensity': tedi,
                     'average_overheating_hours': overheating,
                     ('max_overheating_hours' if self.constrained_analysis else 'pareto_optimal'): max_overheating_hours if self.constrained_analysis else False
                 }
@@ -147,7 +147,7 @@ class EvaluationCallback(Callback):
                 self.solutions_by_generation[generation].append(combination_key)
                 
                 # Store objective values for Pareto comparison
-                self.all_objectives.append([meui, overheating])
+                self.all_objectives.append([tedi, overheating])
         
         # Calculate current Pareto optimality for display purposes
         if not self.constrained_analysis:
@@ -314,20 +314,20 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             # # Generate dummy results based on overheating criterion
             # if self.overheating_criterion.upper() == 'CIBSE59':
             #     # CIBSE59 dummy results
-            #     meui = random.uniform(50, 200) + sum(param_values) * 10
+            #     tedi = random.uniform(50, 200) + sum(param_values) * 10
             #     average_overheating = random.uniform(0, 50) + sum(param_values) * 2
             #     max_living_room_overheating = random.uniform(20, 40) + sum(param_values) * 1
             #     max_bedroom_overheating = random.uniform(15, 35) + sum(param_values) * 1
             #     max_overheating_hours = max(max_living_room_overheating, max_bedroom_overheating)
             # else:
             #     # ASHRAE dummy results
-            #     meui = random.uniform(50, 200) + sum(param_values) * 10
+            #     tedi = random.uniform(50, 200) + sum(param_values) * 10
             #     average_overheating = random.uniform(0, 100) + sum(param_values) * 5
             #     max_overheating_hours = random.uniform(0, 80) + sum(param_values) * 3
             #     max_living_room_overheating = None
             #     max_bedroom_overheating = None
             # 
-            # objective_values = [meui, average_overheating]
+            # objective_values = [tedi, average_overheating]
             # REAL SIMULATION CODE - UNCOMMENTED FOR ACTUAL ENERGYPLUS SIMULATIONS
             
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
@@ -346,7 +346,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
-                mechanical_energy_use_intensity = district_heating / 2590.29
+                thermal_energy_demand_intensity = district_heating / 2590.29
                 
                 # Handle different overheating criteria
                 if self.overheating_criterion.upper() == 'CIBSE59':
@@ -358,7 +358,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     max_living_room_overheating = None
                     max_bedroom_overheating = None
                 
-                objective_values = [mechanical_energy_use_intensity, average_overheating]
+                objective_values = [thermal_energy_demand_intensity, average_overheating]
             else:
                 objective_values = [1000.0, 1000.0]
                 if self.overheating_criterion.upper() == 'CIBSE59':
