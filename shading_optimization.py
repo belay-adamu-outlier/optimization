@@ -368,7 +368,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 process_id = os.getpid()
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 shading_dict = build_seasonal_shading_schedules(x, element_configs)
-                print(f"Shading schedule: {shading_dict}")
+
                 output_dir = run_simulation(
                     idf_path="Building_SW_2nd_Floor_Shading.idf",
                     weather_path=self.weather_file,

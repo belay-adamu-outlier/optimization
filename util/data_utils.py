@@ -225,6 +225,40 @@ def print_optimization_table(
     print(f"  Current generation: {generation}")
 
 
+def _calculate_evolution_data(solutions_by_gen, generations, top_n, metric_key):
+    """
+    Calculate evolution data for a given metric.
+    
+    Args:
+        solutions_by_gen: Dict mapping generation to list of solutions
+        generations: List of generation numbers
+        top_n: Number of best solutions to average for previous generations
+        metric_key: Key to extract metric from solution dict
+        
+    Returns:
+        tuple: (avg_values, cumulative_best_values, final_best_value)
+    """
+    avg_values = []
+    cumulative_best_values = []
+    
+    # Calculate cumulative best at each generation (progressive improvement)
+    running_best = float('inf')  # Start with worst possible value
+    
+    for gen in generations:
+        # Average of ALL solutions in each generation (shows true evolution)
+        gen_avg = np.mean([s[metric_key] for s in solutions_by_gen[gen]])
+        avg_values.append(gen_avg)
+        
+        # Find best value in current generation
+        gen_best = min([s[metric_key] for s in solutions_by_gen[gen]])
+        
+        # Update running best if current generation has better value
+        running_best = min(running_best, gen_best)
+        cumulative_best_values.append(running_best)
+    
+    return avg_values, cumulative_best_values, running_best
+
+
 def update_pareto_optimality(solutions_by_key, all_objectives):
     """Update Pareto optimality for all solutions found so far."""
     if not all_objectives:
@@ -734,54 +768,57 @@ def plot_evolution(solutions_by_key, top_n=5, fig=None, axes=None):
     for ax in axes:
         ax.clear()
     
-    # Plot TEDI evolution (use markers so single-generation results are visible)
-    avg_tedi = [np.mean([s['thermal_energy_demand_intensity']
-                         for s in solutions_by_gen[gen][:top_n]])
-                for gen in generations]
-    best_tedi = [min([s['thermal_energy_demand_intensity']
-                      for s in solutions_by_gen[gen]])
-                 for gen in generations]
+    # Plot TEDI evolution using refactored function
+    avg_tedi, cumulative_best_tedi, _ = _calculate_evolution_data(
+        solutions_by_gen, generations, top_n, 'thermal_energy_demand_intensity'
+    )
+    
+    # Plot evolution across all generations (shows true convergence)
     axes[0].plot(generations, avg_tedi, color='b', linestyle='-', marker='o',
-                 label=f'Avg Top {top_n}')
-    axes[0].plot(generations, best_tedi, color='b', linestyle='--', marker='o',
-                 label='Best')
+                 label='All Gen: All Solutions Avg')
+    
+    # Cumulative best shows progressive improvement over generations
+    axes[0].plot(generations, cumulative_best_tedi, color='b', linestyle='--', marker='o',
+                 label='Cumulative Best (Progressive)')
     axes[0].set_ylabel('TEDI (kWh/m²)')
     axes[0].legend()
     axes[0].grid(True)
     
-    # Plot Living Room Overheating evolution
-    avg_lr = [np.mean([s['max_living_room_overheating']
-                       for s in solutions_by_gen[gen][:top_n]])
-              for gen in generations]
-    best_lr = [min([s['max_living_room_overheating']
-                    for s in solutions_by_gen[gen]])
-               for gen in generations]
+    # Plot Living Room Overheating evolution using refactored function
+    avg_lr, cumulative_best_lr, _ = _calculate_evolution_data(
+        solutions_by_gen, generations, top_n, 'max_living_room_overheating'
+    )
+    
+    # Plot evolution across all generations (shows true convergence)
     axes[1].plot(generations, avg_lr, color='r', linestyle='-', marker='o',
-                 label=f'Avg Top {top_n}')
-    axes[1].plot(generations, best_lr, color='r', linestyle='--', marker='o',
-                 label='Best')
+                 label='All Gen: All Solutions Avg')
+    
+    # Cumulative best shows progressive improvement over generations
+    axes[1].plot(generations, cumulative_best_lr, color='r', linestyle='--', marker='o',
+                 label='Cumulative Best (Progressive)')
     axes[1].set_ylabel('Living Room Overheating (hrs)')
     axes[1].legend()
     axes[1].grid(True)
     
-    # Plot Bedroom Overheating evolution
-    avg_br = [np.mean([s['max_bedroom_overheating']
-                       for s in solutions_by_gen[gen][:top_n]])
-              for gen in generations]
-    best_br = [min([s['max_bedroom_overheating']
-                    for s in solutions_by_gen[gen]])
-               for gen in generations]
+    # Plot Bedroom Overheating evolution using refactored function
+    avg_br, cumulative_best_br, _ = _calculate_evolution_data(
+        solutions_by_gen, generations, top_n, 'max_bedroom_overheating'
+    )
+    
+    # Plot evolution across all generations (shows true convergence)
     axes[2].plot(generations, avg_br, color='g', linestyle='-', marker='o',
-                 label=f'Avg Top {top_n}')
-    axes[2].plot(generations, best_br, color='g', linestyle='--', marker='o',
-                 label='Best')
+                 label='All Gen: All Solutions Avg')
+    
+    # Cumulative best shows progressive improvement over generations
+    axes[2].plot(generations, cumulative_best_br, color='g', linestyle='--', marker='o',
+                 label='Cumulative Best (Progressive)')
     axes[2].set_xlabel('Generation')
     axes[2].set_ylabel('Bedroom Overheating (hrs)')
     axes[2].legend()
     axes[2].grid(True)
     
     # Update title
-    fig.suptitle(f'Evolution of Top {top_n} Solutions', fontsize=14)
+    fig.suptitle('Evolution: All Generations (All Solutions Avg) + Cumulative Best (Progressive)', fontsize=14)
     
     # Update display (layout already handled by subplots_adjust)
     fig.canvas.draw()
