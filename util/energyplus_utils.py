@@ -949,3 +949,103 @@ if __name__ == "__main__":
     
     # Print summary
     print_simulation_summary(results)
+
+
+def _expand_partial_schedule(partial_values, time_slots_per_season, fixed_morning_values=None):
+    """
+    Expand partial schedule values to full schedule with optional fixed morning values.
+    
+    Args:
+        partial_values: List of values for the time slots that are optimized
+        time_slots_per_season: Number of time slots per season (e.g., 6 for full day)
+        fixed_morning_values: List of fixed values for morning slots (e.g., [0, 0, 0] for 06-12)
+                             If None, no fixed values are inserted
+    
+    Returns:
+        List of full schedule values
+    """
+    if not partial_values:
+        return [0] * (time_slots_per_season * 4)  # 4 seasons
+    
+    seasons = 4  # spring, summer, fall, winter
+    values_per_season = len(partial_values) // seasons
+    
+    if len(partial_values) != values_per_season * seasons:
+        raise ValueError(f"Expected {values_per_season * seasons} values, got {len(partial_values)}")
+    
+    full_schedule = []
+    for season in range(seasons):
+        season_start = season * values_per_season
+        season_values = partial_values[season_start:season_start + values_per_season]
+        
+        if fixed_morning_values:
+            # Insert fixed morning values at the beginning of each season
+            full_schedule.extend(fixed_morning_values + season_values)
+        else:
+            # No fixed values, use as-is
+            full_schedule.extend(season_values)
+    
+    return full_schedule
+
+
+def build_seasonal_shading_schedules(optimization_variables, element_configs):
+    """
+    Build seasonal dict format for apply_shading_schedules_to_idf from optimization variables.
+    
+    Args:
+        optimization_variables: List of optimization variables (0s and 1s)
+        element_configs: List of dicts with element configuration:
+            [
+                {
+                    'name': 'south_overhang',
+                    'type': 'full_day',  # or 'afternoon_only'
+                    'start_idx': 0,
+                    'time_slots': 24,  # or 12 for afternoon_only
+                    'fixed_morning': None  # or [0, 0, 0] for afternoon_only
+                },
+                ...
+            ]
+    
+    Returns:
+        Dict mapping element names to seasonal schedules
+    """
+    shading_dict = {}
+    var_idx = 0
+    
+    for config in element_configs:
+        element_name = config['name']
+        element_type = config['type']
+        start_idx = config['start_idx']
+        time_slots = config['time_slots']
+        fixed_morning = config.get('fixed_morning')
+        
+        if element_type == 'full_day':
+            # Take full 24 variables (4 seasons × 6 time slots)
+            end_idx = start_idx + 24
+            element_values = [int(v) for v in optimization_variables[start_idx:end_idx]]
+            var_idx += 24
+            
+        elif element_type == 'afternoon_only':
+            # Take 12 variables (4 seasons × 3 afternoon time slots)
+            end_idx = start_idx + 12
+            afternoon_values = [int(v) for v in optimization_variables[start_idx:end_idx]]
+            # Expand to full 24-value schedule
+            element_values = _expand_partial_schedule(
+                afternoon_values, 
+                time_slots_per_season=6, 
+                fixed_morning_values=fixed_morning
+            )
+            var_idx += 12
+        else:
+            raise ValueError(f"Unknown element type: {element_type}")
+        
+        # Convert to seasonal dict format
+        seasonal_dict = {}
+        seasons = ['spring', 'summer', 'fall', 'winter']
+        for i, season in enumerate(seasons):
+            season_start = i * 6
+            seasonal_dict[season] = element_values[season_start:season_start + 6]
+        
+        shading_dict[element_name] = seasonal_dict
+    
+    return shading_dict

@@ -337,8 +337,9 @@ def _csv_fieldnames(
     base = ['Generation', 'Iteration']
     objectives = _objective_headers(problem_type, constrained_analysis, overheating_criterion)
     if problem_type == 'shading':
-        # Use provided objective names if given; fall back to defaults
-        objs = objective_names or [
+        # For shading problems, always include all three columns (MEUI + both overheating)
+        # The objective_names parameter only controls which objectives are optimized, not which columns are displayed
+        objs = [
             'Mechanical_Energy_Use_Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating'
@@ -369,8 +370,9 @@ def _format_row(
     if problem_type == 'shading':
         schedule_str = ''.join('1' if v == 1 else '0' for v in result.get('shading_schedule', []))
         row['Shading_Schedule'] = schedule_str
-        # Write objectives in provided order
-        names = objective_names or [
+        # For shading problems, always write all three columns regardless of objective_names
+        # objective_names only controls which objectives are optimized, not which columns are displayed
+        names = [
             'Mechanical_Energy_Use_Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating'

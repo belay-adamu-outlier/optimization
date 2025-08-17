@@ -20,7 +20,11 @@ from pymoo.optimize import minimize
 from pymoo.core.callback import Callback
 
 # Own imports
-from util.energyplus_utils import run_simulation, analyze_simulation_results
+from util.energyplus_utils import (
+    run_simulation, 
+    analyze_simulation_results, 
+    build_seasonal_shading_schedules
+)
 from util.simulation_utils import (
     create_shared_cache,
     make_cache_key,
@@ -101,18 +105,26 @@ class ShadingOptimizationCallback(Callback):
                     
                     # Support single or multi-objective by pulling from cache params
                     meui = params.get('meui') if params else None
-                    max_lr_oh = cache_entry.get('max_living_room_overheating')
-                    max_br_oh = cache_entry.get('max_bedroom_overheating')
-                    # Fallback if objectives length is 3
+                    # Get overheating values from cache entry (they're stored as separate parameters)
+                    max_lr_oh = cache_entry.get('max_living_room_overheating', 0.0)
+                    max_br_oh = cache_entry.get('max_bedroom_overheating', 0.0)
+                    
+                    # Fallback to objectives if needed
                     if meui is None:
                         try:
                             meui = objectives[0]
                         except Exception:
                             meui = 0.0
-                    if max_lr_oh is None and len(objectives) >= 2:
-                        max_lr_oh = objectives[1]
-                    if max_br_oh is None and len(objectives) >= 3:
-                        max_br_oh = objectives[2]
+                    if max_lr_oh is None or max_lr_oh == 0.0:
+                        if len(objectives) >= 2:
+                            max_lr_oh = objectives[1]
+                        else:
+                            max_lr_oh = 0.0
+                    if max_br_oh is None or max_br_oh == 0.0:
+                        if len(objectives) >= 3:
+                            max_br_oh = objectives[2]
+                        else:
+                            max_br_oh = 0.0
                     
                     solution_dict = {
                         'generation': generation,
@@ -193,18 +205,26 @@ class ShadingOptimizationCallback(Callback):
                     iteration = i + 1
                     
                     meui = params.get('meui') if params else None
-                    max_lr_oh = cache_entry.get('max_living_room_overheating')
-                    max_br_oh = cache_entry.get('max_bedroom_overheating')
-
+                    # Get overheating values from cache entry (they're stored as separate parameters)
+                    max_lr_oh = cache_entry.get('max_living_room_overheating', 0.0)
+                    max_br_oh = cache_entry.get('max_bedroom_overheating', 0.0)
+                    
+                    # Fallback to objectives if needed
                     if meui is None:
                         try:
                             meui = objectives[0]
                         except Exception:
                             meui = 0.0
-                    if max_lr_oh is None and len(objectives) >= 2:
-                        max_lr_oh = objectives[1]
-                    if max_br_oh is None and len(objectives) >= 3:
-                        max_br_oh = objectives[2]
+                    if max_lr_oh is None or max_lr_oh == 0.0:
+                        if len(objectives) >= 2:
+                            max_lr_oh = objectives[1]
+                        else:
+                            max_lr_oh = 0.0
+                    if max_br_oh is None or max_br_oh == 0.0:
+                        if len(objectives) >= 3:
+                            max_br_oh = objectives[2]
+                        else:
+                            max_br_oh = 0.0
                     
                     solution_dict = {
                         'generation': generation,
@@ -246,8 +266,17 @@ class ShadingOptimizationProblem(ElementwiseProblem):
         self.active_elements = active_elements or [
             'south_overhang', 'south_fin', 'west_overhang', 'west_fin'
         ]
-        # 24 values per element (4 seasons x 6 periods)
-        n_var = len(self.active_elements) * 24
+        
+        # Calculate variable count: 2 south elements × 24 + 2 west elements × 12 = 72
+        # South elements: full 24 variables (4 seasons × 6 time slots)
+        # West elements: 12 variables (4 seasons × 3 afternoon time slots only)
+        # Morning slots (06-08, 08-10, 10-12) for west elements are fixed at 0
+        # Afternoon slots (12-14, 14-16, 16-18) for west elements are optimized
+        south_elements = ['south_overhang', 'south_fin']
+        west_elements = ['west_overhang', 'west_fin']
+        
+        n_var = (len([e for e in self.active_elements if e in south_elements]) * 24 + 
+                 len([e for e in self.active_elements if e in west_elements]) * 12)
         
         # Binary variables: 0 = no shading, 1 = shading
         xl = np.zeros(n_var, dtype=int)  # Lower bound: 0
@@ -282,12 +311,40 @@ class ShadingOptimizationProblem(ElementwiseProblem):
         self.current_generation = 0  # Track current generation
         self.overheating_criterion = overheating_criterion
         self.test_mode = test_mode
+        self.south_elements = south_elements
+        self.west_elements = west_elements
 
     def set_generation(self, generation):
         """Set the current generation number for tracking purposes."""
         self.current_generation = generation
 
+
+
     def _evaluate(self, x, out, *args, **kwargs):
+        # Initialize element_configs at the beginning to ensure it's always defined
+        element_configs = []
+        var_idx = 0
+        
+        for element in self.active_elements:
+            if element in self.south_elements:
+                element_configs.append({
+                    'name': element,
+                    'type': 'full_day',
+                    'start_idx': var_idx,
+                    'time_slots': 24,
+                    'fixed_morning': None
+                })
+                var_idx += 24
+            elif element in self.west_elements:
+                element_configs.append({
+                    'name': element,
+                    'type': 'afternoon_only',
+                    'start_idx': var_idx,
+                    'time_slots': 12,
+                    'fixed_morning': [0, 0, 0]
+                })
+                var_idx += 12
+        
         try:
             # Convert to explicit 0/1 ints to avoid boolean strings
             shading_schedule = [int(v) for v in x]
@@ -300,7 +357,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 cached_result = get_from_cache(self.shared_cache, combination_key)
                 if cached_result is not None:
                     objective_values, max_overheating_hours = cached_result
-                    out["F"] = objective_values  # Always 2 objectives
+                    out["F"] = objective_values
                     return
             
             # Use dummy data if in test mode, otherwise run simulation
@@ -311,12 +368,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 process_id = os.getpid()
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 
-                # Run simulation with shading schedule
-                # Build per-element 24-value dict for the IDF modifier
-                shading_dict = {}
-                for idx, name in enumerate(self.active_elements):
-                    start = idx * 24
-                    shading_dict[name] = shading_schedule[start:start + 24]
+                shading_dict = build_seasonal_shading_schedules(x, element_configs)
 
                 output_dir = run_simulation(
                     idf_path="Building_SW_Shading.idf",
@@ -326,7 +378,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                         "wall_solar_absorptance": 0.15,
                         "roof_solar_absorptance": 0.37,
                         'shading_schedule': shading_dict
-                    },  # Pass shading schedule
+                    },  # Pass seasonal dict format
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
                     output_dir=f"shading_simulation_output_{timestamp}_pid{process_id}",
                     verbose='q'
@@ -381,7 +433,17 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                         continue
                     constraints_vals.append(measures_current[key] - float(bound))
 
-            # Store results in shared cache
+            # Create full 96-value schedule for caching (callback compatibility)
+            # Reuse the element_configs created earlier to build the full schedule
+            full_seasonal_dict = build_seasonal_shading_schedules(shading_schedule, element_configs)
+            
+            # Flatten to 96 values for cache compatibility
+            full_schedule = []
+            for element in self.active_elements:
+                for season in ['spring', 'summer', 'fall', 'winter']:
+                    full_schedule.extend(full_seasonal_dict[element][season])
+
+            # Store results in shared cache with full 96-value schedule
             if self.shared_cache is not None:
                 set_in_cache(
                     self.shared_cache, 
@@ -390,7 +452,7 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                     max_overheating_hours, 
                     generation=self.current_generation,
                     params={
-                        'shading_schedule': shading_schedule,
+                        'shading_schedule': full_schedule,  # 96 values for callback compatibility
                         'active_elements': self.active_elements,
                         'meui': mechanical_energy_use_intensity
                     },
@@ -404,7 +466,9 @@ class ShadingOptimizationProblem(ElementwiseProblem):
                 out["G"] = np.array(constraints_vals)
             
         except Exception as e:
-            out["F"] = [1000.0, 1000.0, 1000.0]  # Three objectives
+            # Create penalty values based on actual number of objectives
+            penalty_values = [1000.0] * len(self.objectives)
+            out["F"] = np.array(penalty_values, dtype=float)
             print(f"Error evaluating individual: {str(e)}")
 
 
@@ -453,7 +517,7 @@ def initialize_shading_optimization(
     )
     
     print("Shading optimization problem initialized:")
-    print("  Variables: 144 binary shading decisions")
+    print("  Variables: 72 binary shading decisions (south: 48, west: 24)")
     print(f"  Weather File: {weather_file or 'Vancouver - 2021 AMY.epw'}")
     print(f"  Overheating Criterion: {overheating_criterion}")
     print(f"  Number of Workers: {num_workers}")

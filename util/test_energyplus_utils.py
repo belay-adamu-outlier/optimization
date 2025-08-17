@@ -19,6 +19,8 @@ from .energyplus_utils import (
     rename_shading_elements_by_orientation,
     assign_shading_transmittance_schedules,
     apply_shading_schedules_to_idf,
+    _expand_partial_schedule,
+    build_seasonal_shading_schedules,
 )
 
 
@@ -1002,5 +1004,202 @@ class TestApplyShadingSchedulesToIdf:
         mock_schedule.Schedule_Type_Limits_Name = 'Fraction'
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"]) 
+class TestShadingOptimizationHelpers:
+    """Test cases for shading optimization helper functions."""
+    
+    def test_expand_partial_schedule_no_fixed_values(self):
+        """Test expanding partial schedule without fixed morning values."""
+        partial_values = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]  # 4 seasons × 3 values
+        result = _expand_partial_schedule(partial_values, time_slots_per_season=3)
+        expected = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]  # Same as input
+        assert result == expected
+    
+    def test_expand_partial_schedule_with_fixed_morning(self):
+        """Test expanding partial schedule with fixed morning values."""
+        partial_values = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0]  # 4 seasons × 3 values
+        fixed_morning = [0, 0, 0]  # 3 morning slots
+        result = _expand_partial_schedule(partial_values, time_slots_per_season=6, fixed_morning_values=fixed_morning)
+        
+        # Expected: 4 seasons × 6 slots = 24 values
+        # Each season: [0, 0, 0] + [1, 0, 1] = [0, 0, 0, 1, 0, 1]
+        # The function processes seasons in order, so the pattern repeats correctly
+        expected = [0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0]
+        assert result == expected
+    
+    def test_expand_partial_schedule_empty_input(self):
+        """Test expanding empty partial schedule."""
+        result = _expand_partial_schedule([], time_slots_per_season=6)
+        expected = [0] * 24  # 4 seasons × 6 slots
+        assert result == expected
+    
+    def test_expand_partial_schedule_invalid_length(self):
+        """Test expanding partial schedule with invalid length."""
+        partial_values = [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]  # 11 values (not divisible by 4)
+        with pytest.raises(ValueError, match="Expected 8 values, got 11"):
+            _expand_partial_schedule(partial_values, time_slots_per_season=2)
+    
+    def test_build_seasonal_shading_schedules_full_day_elements(self):
+        """Test building seasonal schedules for full-day elements."""
+        optimization_variables = [1] * 96  # 4 elements × 24 variables
+        element_configs = [
+            {
+                'name': 'south_overhang',
+                'type': 'full_day',
+                'start_idx': 0,
+                'time_slots': 24,
+                'fixed_morning': None
+            },
+            {
+                'name': 'south_fin',
+                'type': 'full_day',
+                'start_idx': 24,
+                'time_slots': 24,
+                'fixed_morning': None
+            }
+        ]
+        
+        result = build_seasonal_shading_schedules(optimization_variables, element_configs)
+        
+        assert 'south_overhang' in result
+        assert 'south_fin' in result
+        
+        # Check south_overhang (first 24 variables)
+        south_overhang = result['south_overhang']
+        assert south_overhang['spring'] == [1, 1, 1, 1, 1, 1]
+        assert south_overhang['summer'] == [1, 1, 1, 1, 1, 1]
+        assert south_overhang['fall'] == [1, 1, 1, 1, 1, 1]
+        assert south_overhang['winter'] == [1, 1, 1, 1, 1, 1]
+        
+        # Check south_fin (next 24 variables)
+        south_fin = result['south_fin']
+        assert south_fin['spring'] == [1, 1, 1, 1, 1, 1]
+        assert south_fin['summer'] == [1, 1, 1, 1, 1, 1]
+        assert south_fin['fall'] == [1, 1, 1, 1, 1, 1]
+        assert south_fin['winter'] == [1, 1, 1, 1, 1, 1]
+    
+    def test_build_seasonal_shading_schedules_afternoon_only_elements(self):
+        """Test building seasonal schedules for afternoon-only elements."""
+        # 72 variables: 2 full-day (48) + 2 afternoon-only (24)
+        optimization_variables = [1] * 72
+        
+        element_configs = [
+            {
+                'name': 'south_overhang',
+                'type': 'full_day',
+                'start_idx': 0,
+                'time_slots': 24,
+                'fixed_morning': None
+            },
+            {
+                'name': 'south_fin',
+                'type': 'full_day',
+                'start_idx': 24,
+                'time_slots': 24,
+                'fixed_morning': None
+            },
+            {
+                'name': 'west_overhang',
+                'type': 'afternoon_only',
+                'start_idx': 48,
+                'time_slots': 12,
+                'fixed_morning': [0, 0, 0]
+            },
+            {
+                'name': 'west_fin',
+                'type': 'afternoon_only',
+                'start_idx': 60,
+                'time_slots': 12,
+                'fixed_morning': [0, 0, 0]
+            }
+        ]
+        
+        result = build_seasonal_shading_schedules(optimization_variables, element_configs)
+        
+        # Check west_overhang (afternoon-only with fixed morning)
+        west_overhang = result['west_overhang']
+        assert west_overhang['spring'] == [0, 0, 0, 1, 1, 1]  # [morning] + [afternoon]
+        assert west_overhang['summer'] == [0, 0, 0, 1, 1, 1]
+        assert west_overhang['fall'] == [0, 0, 0, 1, 1, 1]
+        assert west_overhang['winter'] == [0, 0, 0, 1, 1, 1]
+        
+        # Check west_fin (afternoon-only with fixed morning)
+        west_fin = result['west_fin']
+        assert west_fin['spring'] == [0, 0, 0, 1, 1, 1]
+        assert west_fin['summer'] == [0, 0, 0, 1, 1, 1]
+        assert west_fin['fall'] == [0, 0, 0, 1, 1, 1]
+        assert west_fin['winter'] == [0, 0, 0, 1, 1, 1]
+    
+    def test_build_seasonal_shading_schedules_mixed_types(self):
+        """Test building seasonal schedules with mixed element types."""
+        # 48 variables: 1 full-day (24) + 1 afternoon-only (24)
+        optimization_variables = [1] * 48
+        
+        element_configs = [
+            {
+                'name': 'south_overhang',
+                'type': 'full_day',
+                'start_idx': 0,
+                'time_slots': 24,
+                'fixed_morning': None
+            },
+            {
+                'name': 'west_overhang',
+                'type': 'afternoon_only',
+                'start_idx': 24,
+                'time_slots': 12,
+                'fixed_morning': [0, 0, 0]
+            }
+        ]
+        
+        result = build_seasonal_shading_schedules(optimization_variables, element_configs)
+        
+        assert len(result) == 2
+        assert 'south_overhang' in result
+        assert 'west_overhang' in result
+        
+        # Verify south_overhang has full 24 values
+        south_overhang = result['south_overhang']
+        assert all(len(season) == 6 for season in south_overhang.values())
+        
+        # Verify west_overhang has 6 values per season (0,0,0 + 1,1,1)
+        west_overhang = result['west_overhang']
+        assert all(len(season) == 6 for season in west_overhang.values())
+        assert all(season[:3] == [0, 0, 0] for season in west_overhang.values())
+        assert all(season[3:] == [1, 1, 1] for season in west_overhang.values())
+    
+    def test_build_seasonal_shading_schedules_invalid_element_type(self):
+        """Test building seasonal schedules with invalid element type."""
+        optimization_variables = [1] * 24
+        element_configs = [
+            {
+                'name': 'invalid_element',
+                'type': 'invalid_type',
+                'start_idx': 0,
+                'time_slots': 24,
+                'fixed_morning': None
+            }
+        ]
+        
+        with pytest.raises(ValueError, match="Unknown element type: invalid_type"):
+            build_seasonal_shading_schedules(optimization_variables, element_configs)
+    
+    def test_build_seasonal_shading_schedules_variable_conversion(self):
+        """Test that optimization variables are properly converted to integers."""
+        # Mix of float and string values
+        optimization_variables = [1.0, 0.0, 1.0, 0.0] * 6  # 24 values
+        element_configs = [
+            {
+                'name': 'test_element',
+                'type': 'full_day',
+                'start_idx': 0,
+                'time_slots': 24,
+                'fixed_morning': None
+            }
+        ]
+        
+        result = build_seasonal_shading_schedules(optimization_variables, element_configs)
+        
+        # All values should be converted to integers
+        test_element = result['test_element']
+        assert all(isinstance(val, int) for season in test_element.values() for val in season)
+        assert all(val in [0, 1] for season in test_element.values() for val in season) 
