@@ -14,12 +14,15 @@ Currently no dedicated test file for `util/data_utils.py` (removed to simplify t
 
 ### 2. `util/test_energyplus_utils.py` - EnergyPlus Utilities Tests
 
-Tests for the top 4 functions in `util/energyplus_utils.py`:
+Tests for the core functions in `util/energyplus_utils.py`:
 
 - **`apply_construction_to_surfaces`** - Tests applying different construction types to building surfaces
 - **`apply_infiltration_to_zones`** - Tests applying infiltration rates to zones with proper unit conversion
 - **`calculate_window_geometry`** - Tests window geometry calculations with various aspect ratios
 - **`apply_wwr_to_windows`** - Tests window-to-wall ratio applications based on wall orientation
+- **`rename_outside_walls_by_orientation`** - Tests renaming exterior walls based on geometric orientation
+- **`create_shading_elements_by_orientation`** - Tests creating shading elements (overhangs, fins) for different facades
+- **`modify_idf`** - Tests high-level IDF modification with various envelope parameters
 
 ### 3. `util/test_simulation_utils.py` - Simulation Utilities Tests
 
@@ -168,6 +171,35 @@ pytest test_overheating_analysis.py simple_test.py debug_test.py -v
 - ✅ Multiple fenestration support
 - ✅ Azimuth boundary condition testing
 
+#### TestRenameOutsideWallsByOrientation
+
+- ✅ Renaming outside walls according to orientation (North, South, East, West)
+- ✅ Handling multiple zones with different wall configurations
+- ✅ Processing zones with no outdoor walls
+- ✅ Processing empty zones gracefully
+- ✅ Proper wall classification based on coordinate geometry
+- ✅ Fenestration reference updates for renamed walls
+
+#### TestCreateShadingElementsByOrientation
+
+- ✅ Creating shading elements for different orientations (south, east, west)
+- ✅ Handling missing dimensions gracefully
+- ✅ Processing fenestrations with no matching orientations
+- ✅ Creating elements with empty dimensions dictionary
+- ✅ Handling None dimensions parameter
+- ✅ Conditional creation of overhangs, fins, and right/left fins
+
+#### TestModifyIdf
+
+- ✅ Modifying IDF with all envelope parameters
+- ✅ Processing partial parameter sets
+- ✅ Save functionality with default and custom paths
+- ✅ Handling empty and None parameter dictionaries
+- ✅ WWR-only parameter processing
+- ✅ Albedo-only parameter processing
+- ✅ Conditional application of solar absorptance
+- ✅ Integration with all envelope modification functions
+
 ### test_overheating_analysis.py
 
 #### TestOverheatingAnalysis
@@ -194,6 +226,15 @@ pytest test_overheating_analysis.py simple_test.py debug_test.py -v
 - **Single Source of Truth**: All operations (CSV, plotting, cache file) use the same shared cache to ensure consistency
 - **Package Structure**: Tests in `util/` folder use relative imports (e.g., `from .energyplus_utils`) while root tests use absolute imports
 
+## Test Statistics
+
+The test suite currently contains **76 tests** covering:
+- **Building envelope functions**: 37 tests
+- **Shading schedule functions**: 12 tests
+- **Shading optimization helpers**: 8 tests
+- **Simulation utilities**: 14 tests
+- **Overheating analysis**: 9 tests
+
 ## Expected Test Results
 
 When running the tests, you should see output similar to:
@@ -212,9 +253,9 @@ test_overheating_analysis.py::TestOverheatingAnalysis::test_analyze_overheating_
 
 All tests should pass, indicating that the refactored functions work correctly under various scenarios.
 
-## Adding New Tests
 
-To add new tests:
+
+## Adding New Tests
 
 1. **For utility functions**: Add test methods to the appropriate test class in the `util/` folder
 2. **For main application functions**: Add test methods to test classes in the root directory
@@ -223,9 +264,20 @@ To add new tests:
 5. Use appropriate assertions to verify expected behavior
 6. Run the tests to ensure they pass
 
-## Troubleshooting
+## Test Coverage Standards
 
-If tests fail:
+All functions in the test suite have comprehensive test coverage including:
+
+- **Happy path scenarios**: Normal operation with valid parameters
+- **Edge cases**: Empty parameters, None values, missing data
+- **Error handling**: Graceful degradation when expected data is missing
+- **Integration testing**: Functions work together correctly
+- **Mock testing**: Proper isolation from external dependencies
+- **Parameter validation**: Various parameter combinations and partial sets
+
+All functions follow the project's testing standards and include proper docstrings for maintainability.
+
+## Troubleshooting
 
 1. Check that all dependencies are installed: `pip install -r test_requirements.txt`
 2. Ensure you're in the correct directory (project root)

@@ -1203,3 +1203,568 @@ class TestShadingOptimizationHelpers:
         test_element = result['test_element']
         assert all(isinstance(val, int) for season in test_element.values() for val in season)
         assert all(val in [0, 1] for season in test_element.values() for val in season) 
+
+
+class TestRenameOutsideWallsByOrientation:
+    """Test scenarios for rename_outside_walls_by_orientation function."""
+    
+    def setup_method(self):
+        """Set up mock IDF object for each test."""
+        self.mock_idf = Mock()
+        
+        # Mock thermal zones
+        self.mock_zone1 = Mock()
+        self.mock_zone1.Name = 'Zone1'
+        
+        self.mock_zone2 = Mock()
+        self.mock_zone2.Name = 'Zone2'
+        
+        # Mock building surfaces with different orientations
+        # South wall (Y constant, min Y)
+        self.mock_south_wall = Mock()
+        self.mock_south_wall.Zone_Name = 'Zone1'
+        self.mock_south_wall.Name = 'South_Wall_1'
+        self.mock_south_wall.Outside_Boundary_Condition = 'Outdoors'
+        self.mock_south_wall.Vertex_1_Xcoordinate = 5.0
+        self.mock_south_wall.Vertex_2_Xcoordinate = 5.0
+        self.mock_south_wall.Vertex_3_Xcoordinate = 5.0
+        self.mock_south_wall.Vertex_4_Xcoordinate = 5.0
+        self.mock_south_wall.Vertex_1_Ycoordinate = 0.0
+        self.mock_south_wall.Vertex_2_Ycoordinate = 0.0
+        self.mock_south_wall.Vertex_3_Ycoordinate = 0.0
+        self.mock_south_wall.Vertex_4_Ycoordinate = 0.0
+        
+        # North wall (Y constant, max Y)
+        self.mock_north_wall = Mock()
+        self.mock_north_wall.Zone_Name = 'Zone1'
+        self.mock_north_wall.Name = 'North_Wall_1'
+        self.mock_north_wall.Outside_Boundary_Condition = 'Outdoors'
+        self.mock_north_wall.Vertex_1_Xcoordinate = 5.0
+        self.mock_north_wall.Vertex_2_Xcoordinate = 5.0
+        self.mock_north_wall.Vertex_3_Xcoordinate = 5.0
+        self.mock_north_wall.Vertex_4_Xcoordinate = 5.0
+        self.mock_north_wall.Vertex_1_Ycoordinate = 10.0
+        self.mock_north_wall.Vertex_2_Ycoordinate = 10.0
+        self.mock_north_wall.Vertex_3_Ycoordinate = 10.0
+        self.mock_north_wall.Vertex_4_Ycoordinate = 10.0
+        
+        # East wall (X constant, varying Y)
+        self.mock_east_wall = Mock()
+        self.mock_east_wall.Zone_Name = 'Zone1'
+        self.mock_east_wall.Name = 'East_Wall_1'
+        self.mock_east_wall.Outside_Boundary_Condition = 'Outdoors'
+        self.mock_east_wall.Vertex_1_Xcoordinate = 10.0
+        self.mock_east_wall.Vertex_2_Xcoordinate = 10.0
+        self.mock_east_wall.Vertex_3_Xcoordinate = 10.0
+        self.mock_east_wall.Vertex_4_Xcoordinate = 10.0
+        self.mock_east_wall.Vertex_1_Ycoordinate = 0.0
+        self.mock_east_wall.Vertex_2_Ycoordinate = 0.0
+        self.mock_east_wall.Vertex_3_Ycoordinate = 10.0
+        self.mock_east_wall.Vertex_4_Ycoordinate = 10.0
+        
+        # West wall (X constant, varying Y)
+        self.mock_west_wall = Mock()
+        self.mock_west_wall.Zone_Name = 'Zone1'
+        self.mock_west_wall.Name = 'West_Wall_1'
+        self.mock_west_wall.Outside_Boundary_Condition = 'Outdoors'
+        self.mock_west_wall.Vertex_1_Xcoordinate = 0.0
+        self.mock_west_wall.Vertex_2_Xcoordinate = 0.0
+        self.mock_west_wall.Vertex_3_Xcoordinate = 0.0
+        self.mock_west_wall.Vertex_4_Xcoordinate = 0.0
+        self.mock_west_wall.Vertex_1_Ycoordinate = 0.0
+        self.mock_west_wall.Vertex_2_Ycoordinate = 0.0
+        self.mock_west_wall.Vertex_3_Ycoordinate = 10.0
+        self.mock_west_wall.Vertex_4_Ycoordinate = 10.0
+        
+        # Indoor wall (should not be renamed)
+        self.mock_indoor_wall = Mock()
+        self.mock_indoor_wall.Zone_Name = 'Zone1'
+        self.mock_indoor_wall.Name = 'Indoor_Wall_1'
+        self.mock_indoor_wall.Outside_Boundary_Condition = 'Surface'
+        self.mock_indoor_wall.Vertex_1_Xcoordinate = 5.0
+        self.mock_indoor_wall.Vertex_2_Xcoordinate = 5.0
+        self.mock_indoor_wall.Vertex_3_Xcoordinate = 5.0
+        self.mock_indoor_wall.Vertex_4_Xcoordinate = 5.0
+        self.mock_indoor_wall.Vertex_1_Ycoordinate = 5.0
+        self.mock_indoor_wall.Vertex_2_Ycoordinate = 5.0
+        self.mock_indoor_wall.Vertex_3_Ycoordinate = 5.0
+        self.mock_indoor_wall.Vertex_4_Ycoordinate = 5.0
+        
+        # Mock fenestrations
+        self.mock_fenestration1 = Mock()
+        self.mock_fenestration1.Building_Surface_Name = 'South_Wall_1'
+        
+        self.mock_fenestration2 = Mock()
+        self.mock_fenestration2.Building_Surface_Name = 'North_Wall_1'
+        
+        self.mock_fenestration3 = Mock()
+        self.mock_fenestration3.Building_Surface_Name = 'East_Wall_1'
+        
+        self.mock_fenestration4 = Mock()
+        self.mock_fenestration4.Building_Surface_Name = 'West_Wall_1'
+        
+        # Set up idfobjects dictionary
+        self.mock_idf.idfobjects = {
+            'ZONE': [self.mock_zone1, self.mock_zone2],
+            'BUILDINGSURFACE:DETAILED': [
+                self.mock_south_wall, self.mock_north_wall, 
+                self.mock_east_wall, self.mock_west_wall, self.mock_indoor_wall
+            ],
+            'FENESTRATIONSURFACE:DETAILED': [
+                self.mock_fenestration1, self.mock_fenestration2,
+                self.mock_fenestration3, self.mock_fenestration4
+            ]
+        }
+    
+    def test_rename_outside_walls_by_orientation(self):
+        """Test renaming outside walls according to orientation."""
+        from .energyplus_utils import rename_outside_walls_by_orientation
+        
+        result = rename_outside_walls_by_orientation(self.mock_idf)
+        
+        # Verify walls were renamed correctly
+        assert self.mock_south_wall.Name == 'South:Zone1'
+        assert self.mock_north_wall.Name == 'North:Zone1'
+        assert self.mock_east_wall.Name == 'East:Zone1'
+        assert self.mock_west_wall.Name == 'West:Zone1'
+        
+        # Indoor wall should not be renamed
+        assert self.mock_indoor_wall.Name == 'Indoor_Wall_1'
+        
+        # Verify fenestrations were updated
+        assert self.mock_fenestration1.Building_Surface_Name == 'South:Zone1'
+        assert self.mock_fenestration2.Building_Surface_Name == 'North:Zone1'
+        assert self.mock_fenestration3.Building_Surface_Name == 'East:Zone1'
+        assert self.mock_fenestration4.Building_Surface_Name == 'West:Zone1'
+        
+        # Verify IDF object is returned
+        assert result == self.mock_idf
+    
+    def test_rename_outside_walls_with_multiple_zones(self):
+        """Test renaming outside walls for multiple zones."""
+        # Add walls for Zone2
+        zone2_south_wall = Mock()
+        zone2_south_wall.Zone_Name = 'Zone2'
+        zone2_south_wall.Name = 'Zone2_South_Wall'
+        zone2_south_wall.Outside_Boundary_Condition = 'Outdoors'
+        zone2_south_wall.Vertex_1_Xcoordinate = 15.0
+        zone2_south_wall.Vertex_2_Xcoordinate = 15.0
+        zone2_south_wall.Vertex_3_Xcoordinate = 15.0
+        zone2_south_wall.Vertex_4_Xcoordinate = 15.0
+        zone2_south_wall.Vertex_1_Ycoordinate = 0.0
+        zone2_south_wall.Vertex_2_Ycoordinate = 0.0
+        zone2_south_wall.Vertex_3_Ycoordinate = 0.0
+        zone2_south_wall.Vertex_4_Ycoordinate = 0.0
+        
+        self.mock_idf.idfobjects['BUILDINGSURFACE:DETAILED'].append(zone2_south_wall)
+        
+        from .energyplus_utils import rename_outside_walls_by_orientation
+        
+        result = rename_outside_walls_by_orientation(self.mock_idf)
+        
+        # Verify Zone2 wall was renamed
+        assert zone2_south_wall.Name == 'North:Zone2'
+        
+        # Verify Zone1 walls still renamed correctly
+        assert self.mock_south_wall.Name == 'South:Zone1'
+    
+    def test_rename_outside_walls_with_no_outdoor_walls(self):
+        """Test renaming when no outdoor walls exist."""
+        mock_idf_no_outdoor = Mock()
+        mock_idf_no_outdoor.idfobjects = {
+            'ZONE': [self.mock_zone1],
+            'BUILDINGSURFACE:DETAILED': [self.mock_indoor_wall],
+            'FENESTRATIONSURFACE:DETAILED': []
+        }
+        
+        from .energyplus_utils import rename_outside_walls_by_orientation
+        
+        # Should not raise exception
+        result = rename_outside_walls_by_orientation(mock_idf_no_outdoor)
+        assert result == mock_idf_no_outdoor
+    
+    def test_rename_outside_walls_with_empty_zones(self):
+        """Test renaming when no zones exist."""
+        mock_idf_empty = Mock()
+        mock_idf_empty.idfobjects = {
+            'ZONE': [],
+            'BUILDINGSURFACE:DETAILED': [],
+            'FENESTRATIONSURFACE:DETAILED': []
+        }
+        
+        from .energyplus_utils import rename_outside_walls_by_orientation
+        
+        # Should not raise exception
+        result = rename_outside_walls_by_orientation(mock_idf_empty)
+        assert result == mock_idf_empty
+
+
+class TestCreateShadingElementsByOrientation:
+    """Test scenarios for create_shading_elements_by_orientation function."""
+    
+    def setup_method(self):
+        """Set up mock IDF object for each test."""
+        self.mock_idf = Mock()
+        self.mock_idf.newidfobject = Mock()
+        
+        # Mock fenestrations with different orientations
+        self.mock_south_fenestration = Mock()
+        self.mock_south_fenestration.Building_Surface_Name = 'South:Zone1'
+        
+        # Set up window vertices for south fenestration
+        for i in range(1, 5):
+            setattr(self.mock_south_fenestration, f'Vertex_{i}_Xcoordinate', 5.0)
+            setattr(self.mock_south_fenestration, f'Vertex_{i}_Ycoordinate', 0.0 + (i-1) * 0.5)
+            setattr(self.mock_south_fenestration, f'Vertex_{i}_Zcoordinate', 1.0 if i <= 2 else 2.5)
+        
+        self.mock_east_fenestration = Mock()
+        self.mock_east_fenestration.Building_Surface_Name = 'East:Zone1'
+        
+        # Set up window vertices for east fenestration
+        for i in range(1, 5):
+            setattr(self.mock_east_fenestration, f'Vertex_{i}_Xcoordinate', 10.0 + (i-1) * 0.5)
+            setattr(self.mock_east_fenestration, f'Vertex_{i}_Ycoordinate', 5.0)
+            setattr(self.mock_east_fenestration, f'Vertex_{i}_Zcoordinate', 1.0 if i <= 2 else 2.5)
+        
+        self.mock_west_fenestration = Mock()
+        self.mock_west_fenestration.Building_Surface_Name = 'West:Zone1'
+        
+        # Set up window vertices for west fenestration
+        for i in range(1, 5):
+            setattr(self.mock_west_fenestration, f'Vertex_{i}_Xcoordinate', 0.0 - (i-1) * 0.5)
+            setattr(self.mock_west_fenestration, f'Vertex_{i}_Ycoordinate', 5.0)
+            setattr(self.mock_west_fenestration, f'Vertex_{i}_Zcoordinate', 1.0 if i <= 2 else 2.5)
+        
+        # Set up idfobjects dictionary
+        self.mock_idf.idfobjects = {
+            'FENESTRATIONSURFACE:DETAILED': [
+                self.mock_south_fenestration, self.mock_east_fenestration, self.mock_west_fenestration
+            ]
+        }
+        
+        # Mock dimensions dictionary
+        self.dimensions = {
+            'south': {
+                'overhang': {'length': 0.5},
+                'right_fin': {'length': 0.3},
+                'left_fin': {'length': 0.3}
+            },
+            'east': {
+                'overhang': {'length': 0.4},
+                'fin': {'length': 0.2}
+            },
+            'west': {
+                'overhang': {'length': 0.4},
+                'fin': {'length': 0.2}
+            }
+        }
+    
+    def test_create_shading_elements_by_orientation(self):
+        """Test creating shading elements for different orientations."""
+        from .energyplus_utils import create_shading_elements_by_orientation
+        
+        # Mock the shading templates
+        with patch('util.energyplus_utils.get_shading_templates') as mock_get_templates:
+            mock_get_templates.return_value = {
+                'south_overhang': {'template': 'south_overhang_data'},
+                'south_right_fin': {'template': 'south_right_fin_data'},
+                'south_left_fin': {'template': 'south_left_fin_data'},
+                'east_overhang': {'template': 'east_overhang_data'},
+                'east_fin': {'template': 'east_fin_data'},
+                'west_overhang': {'template': 'west_overhang_data'},
+                'west_fin': {'template': 'west_fin_data'}
+            }
+            
+            result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
+            
+            # Verify new shading elements were created
+            assert self.mock_idf.newidfobject.call_count == 7  # 3 south + 2 east + 2 west
+            
+            # Verify IDF object is returned
+            assert result == self.mock_idf
+    
+    def test_create_shading_elements_with_missing_dimensions(self):
+        """Test creating shading elements when some dimensions are missing."""
+        incomplete_dimensions = {
+            'south': {
+                'overhang': {'length': 0.5}
+                # Missing right_fin and left_fin
+            },
+            'east': {
+                'overhang': {'length': 0.4}
+                # Missing fin
+            }
+        }
+        
+        from .energyplus_utils import create_shading_elements_by_orientation
+        
+        with patch('util.energyplus_utils.get_shading_templates') as mock_get_templates:
+            mock_get_templates.return_value = {
+                'south_overhang': {'template': 'south_overhang_data'},
+                'east_overhang': {'template': 'east_overhang_data'}
+            }
+            
+            result = create_shading_elements_by_orientation(self.mock_idf, incomplete_dimensions)
+            
+            # Should only create elements for available dimensions
+            assert self.mock_idf.newidfobject.call_count == 2  # 1 south + 1 east
+            
+            assert result == self.mock_idf
+    
+    def test_create_shading_elements_with_no_matching_orientations(self):
+        """Test creating shading elements when no fenestrations match orientations."""
+        # Change fenestration names to not match any orientation
+        self.mock_south_fenestration.Building_Surface_Name = 'Unrelated_Wall'
+        self.mock_east_fenestration.Building_Surface_Name = 'Another_Wall'
+        self.mock_west_fenestration.Building_Surface_Name = 'Third_Wall'
+        
+        from .energyplus_utils import create_shading_elements_by_orientation
+        
+        result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
+        
+        # No shading elements should be created
+        assert self.mock_idf.newidfobject.call_count == 0
+        
+        assert result == self.mock_idf
+    
+    def test_create_shading_elements_with_empty_dimensions(self):
+        """Test creating shading elements with empty dimensions dictionary."""
+        empty_dimensions = {}
+        
+        from .energyplus_utils import create_shading_elements_by_orientation
+        
+        result = create_shading_elements_by_orientation(self.mock_idf, empty_dimensions)
+        
+        # No shading elements should be created
+        assert self.mock_idf.newidfobject.call_count == 0
+        
+        assert result == self.mock_idf
+    
+    def test_create_shading_elements_with_none_dimensions(self):
+        """Test creating shading elements with None dimensions."""
+        from .energyplus_utils import create_shading_elements_by_orientation
+        
+        # Should not raise exception
+        result = create_shading_elements_by_orientation(self.mock_idf, None)
+        
+        # No shading elements should be created
+        assert self.mock_idf.newidfobject.call_count == 0
+        
+        assert result == self.mock_idf
+
+
+class TestModifyIdf:
+    """Test scenarios for modify_idf function."""
+    
+    def setup_method(self):
+        """Set up mock IDF object for each test."""
+        self.mock_idf = Mock()
+        self.mock_idf.save = Mock()
+        self.mock_idf.idfname = 'test_file.idf'
+        self.mock_idf.idfobjects = {}
+        
+        # Mock envelope parameters
+        self.envelope_parameters = {
+            'external_wall': 'New_Wall_Construction',
+            'roof': 'New_Roof_Construction',
+            'window': 'New_Window_Construction',
+            'infiltration_ach': 1.5,
+            'wwr_east': 0.3,
+            'wwr_west': 0.2,
+            'wwr_north': 0.1,
+            'wwr_south': 0.4,
+            'wall_solar_absorptance': 0.3,
+            'roof_solar_absorptance': 0.2,
+            'shading_schedule': [1] * 144
+        }
+    
+    def test_modify_idf_with_all_parameters(self):
+        """Test modifying IDF with all envelope parameters."""
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces') as mock_apply_construction, \
+             patch('util.energyplus_utils.apply_infiltration_to_zones') as mock_apply_infiltration, \
+             patch('util.energyplus_utils.apply_wwr_to_windows') as mock_apply_wwr, \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces') as mock_apply_albedo, \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            # Make sure the shading function returns the IDF
+            mock_apply_shading.return_value = self.mock_idf
+            
+            result = modify_idf(self.mock_idf, self.envelope_parameters)
+            
+            # Verify all functions were called
+            mock_apply_construction.assert_called()
+            mock_apply_infiltration.assert_called()
+            mock_apply_wwr.assert_called()
+            mock_apply_albedo.assert_called()
+            mock_apply_shading.assert_called()
+            
+            # Verify IDF object is returned
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_partial_parameters(self):
+        """Test modifying IDF with only some envelope parameters."""
+        partial_parameters = {
+            'external_wall': 'New_Wall_Construction',
+            'infiltration_ach': 1.0
+        }
+        
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces') as mock_apply_construction, \
+             patch('util.energyplus_utils.apply_infiltration_to_zones') as mock_apply_infiltration, \
+             patch('util.energyplus_utils.apply_wwr_to_windows') as mock_apply_wwr, \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces') as mock_apply_albedo, \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            result = modify_idf(self.mock_idf, partial_parameters)
+            
+            # Verify only relevant functions were called
+            mock_apply_construction.assert_called()
+            mock_apply_infiltration.assert_called()
+            mock_apply_wwr.assert_not_called()
+            mock_apply_albedo.assert_not_called()
+            mock_apply_shading.assert_not_called()
+            
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_save_enabled(self):
+        """Test modifying IDF with save enabled."""
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces'), \
+             patch('util.energyplus_utils.apply_infiltration_to_zones'), \
+             patch('util.energyplus_utils.apply_wwr_to_windows'), \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces'), \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            # Make sure the shading function returns the IDF
+            mock_apply_shading.return_value = self.mock_idf
+            
+            result = modify_idf(self.mock_idf, self.envelope_parameters, save=True)
+            
+            # Verify save was called
+            self.mock_idf.save.assert_called_once()
+            
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_custom_save_path(self):
+        """Test modifying IDF with custom save path."""
+        custom_save_path = '/custom/path/modified.idf'
+        
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces'), \
+             patch('util.energyplus_utils.apply_infiltration_to_zones'), \
+             patch('util.energyplus_utils.apply_wwr_to_windows'), \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces'), \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            # Make sure the shading function returns the IDF
+            mock_apply_shading.return_value = self.mock_idf
+            
+            result = modify_idf(self.mock_idf, self.envelope_parameters, save=True, save_path=custom_save_path)
+            
+            # Verify save was called with custom path
+            self.mock_idf.save.assert_called_once_with(custom_save_path)
+            
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_empty_parameters(self):
+        """Test modifying IDF with empty parameters dictionary."""
+        empty_parameters = {}
+        
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces') as mock_apply_construction, \
+             patch('util.energyplus_utils.apply_infiltration_to_zones') as mock_apply_infiltration, \
+             patch('util.energyplus_utils.apply_wwr_to_windows') as mock_apply_wwr, \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces') as mock_apply_albedo, \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            result = modify_idf(self.mock_idf, empty_parameters)
+            
+            # Verify no functions were called
+            mock_apply_construction.assert_not_called()
+            mock_apply_infiltration.assert_not_called()
+            mock_apply_wwr.assert_not_called()
+            mock_apply_albedo.assert_not_called()
+            mock_apply_shading.assert_not_called()
+            
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_none_parameters(self):
+        """Test modifying IDF with None parameters."""
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces') as mock_apply_construction, \
+             patch('util.energyplus_utils.apply_infiltration_to_zones') as mock_apply_infiltration, \
+             patch('util.energyplus_utils.apply_wwr_to_windows') as mock_apply_wwr, \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces') as mock_apply_albedo, \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            result = modify_idf(self.mock_idf, None)
+            
+            # Verify no functions were called
+            mock_apply_construction.assert_not_called()
+            mock_apply_infiltration.assert_not_called()
+            mock_apply_wwr.assert_not_called()
+            mock_apply_albedo.assert_not_called()
+            mock_apply_shading.assert_not_called()
+            
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_wwr_parameters_only(self):
+        """Test modifying IDF with only WWR parameters."""
+        wwr_only_parameters = {
+            'wwr_east': 0.3,
+            'wwr_west': 0.2,
+            'wwr_north': 0.1,
+            'wwr_south': 0.4
+        }
+        
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces') as mock_apply_construction, \
+             patch('util.energyplus_utils.apply_infiltration_to_zones') as mock_apply_infiltration, \
+             patch('util.energyplus_utils.apply_wwr_to_windows') as mock_apply_wwr, \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces') as mock_apply_albedo, \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            result = modify_idf(self.mock_idf, wwr_only_parameters)
+            
+            # Verify only WWR function was called
+            mock_apply_construction.assert_not_called()
+            mock_apply_infiltration.assert_not_called()
+            mock_apply_wwr.assert_called()
+            mock_apply_albedo.assert_not_called()
+            mock_apply_shading.assert_not_called()
+            
+            assert result == self.mock_idf
+    
+    def test_modify_idf_with_albedo_parameters_only(self):
+        """Test modifying IDF with only albedo parameters."""
+        albedo_only_parameters = {
+            'wall_solar_absorptance': 0.3,
+            'roof_solar_absorptance': 0.2
+        }
+        
+        from .energyplus_utils import modify_idf
+        
+        with patch('util.energyplus_utils.apply_construction_to_surfaces') as mock_apply_construction, \
+             patch('util.energyplus_utils.apply_infiltration_to_zones') as mock_apply_infiltration, \
+             patch('util.energyplus_utils.apply_wwr_to_windows') as mock_apply_wwr, \
+             patch('util.energyplus_utils.apply_solar_absorptance_to_surfaces') as mock_apply_albedo, \
+             patch('util.energyplus_utils.apply_shading_schedules_to_idf') as mock_apply_shading:
+            
+            result = modify_idf(self.mock_idf, albedo_only_parameters)
+            
+            # Verify only albedo function was called
+            mock_apply_construction.assert_not_called()
+            mock_apply_infiltration.assert_not_called()
+            mock_apply_wwr.assert_not_called()
+            mock_apply_albedo.assert_called()
+            mock_apply_shading.assert_not_called()
+            
+            assert result == self.mock_idf 
