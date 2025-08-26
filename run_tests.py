@@ -11,9 +11,11 @@ import glob
 
 
 def get_test_files():
-    """Get all test files in the current directory."""
-    test_files = glob.glob("test_*.py")
-    return sorted(test_files)
+    """Get all test files in the current directory and util subdirectory."""
+    root_test_files = glob.glob("test_*.py")
+    util_test_files = glob.glob("util/test_*.py")
+    all_test_files = root_test_files + util_test_files
+    return sorted(all_test_files)
 
 
 def run_tests_with_coverage():
@@ -42,19 +44,33 @@ def run_tests_verbose():
 
 def run_tests_for_module(module_name):
     """Run tests for a specific module."""
+    # Check root directory first
     test_file = f"test_{module_name}.py"
-    if not os.path.exists(test_file):
-        print(f"Error: Test file '{test_file}' not found.")
-        print(f"Available test files: {', '.join(get_test_files())}")
+    if os.path.exists(test_file):
+        print(f"Running tests for {module_name}...")
+        cmd = [
+            sys.executable, "-m", "pytest", 
+            test_file,
+            "-v"
+        ]
+        subprocess.run(cmd)
         return
     
-    print(f"Running tests for {module_name}...")
-    cmd = [
-        sys.executable, "-m", "pytest", 
-        test_file,
-        "-v"
-    ]
-    subprocess.run(cmd)
+    # Check util subdirectory
+    util_test_file = f"util/test_{module_name}.py"
+    if os.path.exists(util_test_file):
+        print(f"Running tests for {module_name}...")
+        cmd = [
+            sys.executable, "-m", "pytest", 
+            util_test_file,
+            "-v"
+        ]
+        subprocess.run(cmd)
+        return
+    
+    # If neither exists, show error
+    print(f"Error: Test file for '{module_name}' not found.")
+    print(f"Available test files: {', '.join(get_test_files())}")
 
 
 def run_specific_test_class(test_class):
@@ -89,22 +105,44 @@ def list_available_tests():
         print(f"{i}. {test_file}")
     
     print("\nAvailable test classes:")
-    print("Data Utils Tests:")
-    print("  - (No data utilities tests currently)")
+    print("Main Module Tests:")
+    print("  - TestBuildingEnvelopeProblem")
+    print("  - TestEvaluationCallback")
+    print("  - TestMainFunction")
+    print("  - TestIntegration")
+    
+    print("\nOverheating Analysis Tests:")
+    print("  - TestOverheatingAnalysis")
+    
+    print("\nData Utils Tests:")
+    print("  - TestEnvelopeOptimizationPlotting")
+    print("  - TestLoadFunctions")
+    print("  - TestPrintFunctions")
+    print("  - TestParameterConversion")
+    print("  - TestParetoOptimality")
+    print("  - TestCSVOperations")
+    print("  - TestDummyDataGeneration")
     
     print("\nEnergyPlus Utils Tests:")
     print("  - TestApplyConstructionToSurfaces")
     print("  - TestApplyInfiltrationToZones")
     print("  - TestCalculateWindowGeometry")
     print("  - TestApplyWwrToWindows")
+    print("  - TestApplySolarAbsorptanceToSurfaces")
+    print("  - TestShadingFunctions")
+    print("  - TestApplyShadingSchedulesToIdf")
+    print("  - TestShadingOptimizationHelpers")
+    print("  - TestRenameOutsideWallsByOrientation")
+    print("  - TestCreateShadingElementsByOrientation")
+    print("  - TestModifyIdf")
     
     print("\nSimulation Utils Tests:")
     print("  - TestTemperatureExtraction")
     print("  - TestDistrictHeatingExtraction")
     print("  - TestSharedCacheFunctions")
     
-    print("\nIDF Modification Tests:")
-    print("  - (No IDF modification tests currently)")
+    print("\nCLI Utils Tests:")
+    print("  - TestCLIUtilities")
     
     print("\nTo see all individual tests:")
     cmd = [

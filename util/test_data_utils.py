@@ -24,7 +24,9 @@ from .data_utils import (
     print_final_results,
     x_to_params,
     update_pareto_optimality_for_display,
-    initialize_csv
+    initialize_csv,
+    generate_dummy_envelope_results,
+    generate_dummy_shading_results
 )
 
 
@@ -406,6 +408,79 @@ class TestCSVOperations:
         with open(csv_filename, 'r') as f:
             content = f.read()
             assert 'Generation,Iteration,Shading_Schedule,Thermal_Energy_Demand_Intensity,Max_Living_Room_Overheating,Max_Bedroom_Overheating,Pareto_Optimal' in content
+
+
+class TestDummyDataGeneration:
+    """Test cases for dummy data generation functions."""
+    
+    def test_generate_dummy_envelope_results_ashrae(self):
+        """Test ASHRAE dummy envelope results generation."""
+        params = {
+            'external_wall': 'R17 - Wall',
+            'roof': 'R70 - Roof',
+            'window': 'Trp LoE Film'
+        }
+        
+        results = generate_dummy_envelope_results(params, 'ASHRAE')
+        
+        assert results['success'] is True
+        assert 'district_heating_kwh' in results
+        assert 'average_overheating_hours' in results
+        assert 'max_overheating_hours' in results
+        assert results['max_living_room_overheating'] is None
+        assert results['max_bedroom_overheating'] is None
+        
+        # Check that values are reasonable
+        # With test params: 'R17 - Wall'(12) + 'R70 - Roof'(9) + 'Trp LoE Film'(13) = 34 chars
+        # So district_heating = random(500,2000) + 34*100 = random(500,2000) + 3400 = 3900-5400
+        # average_overheating = random(0,100) + 34*5 = random(0,100) + 170 = 170-270
+        assert 3900 <= results['district_heating_kwh'] <= 5400
+        assert 170 <= results['average_overheating_hours'] <= 270
+        assert 0 <= results['max_overheating_hours'] <= 200
+    
+    def test_generate_dummy_envelope_results_cibse59(self):
+        """Test CIBSE59 dummy envelope results generation."""
+        params = {
+            'external_wall': 'R17 - Wall',
+            'roof': 'R70 - Roof',
+            'window': 'Trp LoE Film'
+        }
+        
+        results = generate_dummy_envelope_results(params, 'CIBSE59')
+        
+        assert results['success'] is True
+        assert 'district_heating_kwh' in results
+        assert 'average_overheating_hours' in results
+        assert 'max_overheating_hours' in results
+        assert 'max_living_room_overheating' in results
+        assert 'max_bedroom_overheating' in results
+        
+        # Check that values are reasonable
+        # With test params: 'R17 - Wall'(12) + 'R70 - Roof'(9) + 'Trp LoE Film'(13) = 34 chars
+        # So district_heating = random(500,2000) + 34*100 = random(500,2000) + 3400 = 3900-5400
+        # average_overheating = random(0,50) + 34*2 = random(0,50) + 68 = 68-118
+        assert 3900 <= results['district_heating_kwh'] <= 5400
+        assert 68 <= results['average_overheating_hours'] <= 118
+        assert 15 <= results['max_living_room_overheating'] <= 80
+        assert 15 <= results['max_bedroom_overheating'] <= 80
+    
+    def test_generate_dummy_shading_results(self):
+        """Test dummy shading results generation."""
+        shading_schedule = [1, 0, 1, 0] * 6  # 24 values
+        
+        results = generate_dummy_shading_results(shading_schedule)
+        
+        assert results['success'] is True
+        assert 'district_heating_kwh' in results
+        assert 'average_overheating_hours' in results
+        assert 'max_living_room_overheating' in results
+        assert 'max_bedroom_overheating' in results
+        
+        # Check that values are reasonable
+        assert 70 <= results['district_heating_kwh'] / 2590.29 <= 120  # TEDI range
+        assert 0 <= results['average_overheating_hours'] <= 50
+        assert 0 <= results['max_living_room_overheating'] <= 50
+        assert 0 <= results['max_bedroom_overheating'] <= 50
 
 
 if __name__ == '__main__':

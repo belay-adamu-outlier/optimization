@@ -51,7 +51,8 @@ class TestBuildingEnvelopeProblem:
             optimization_variables=self.optimization_variables,
             weather_file=self.weather_file,
             constrained_analysis=False,
-            overheating_criterion='ASHRAE'
+            overheating_criterion='ASHRAE',
+            test_mode=False
         )
         
         assert problem.n_var == 3
@@ -62,6 +63,21 @@ class TestBuildingEnvelopeProblem:
         assert problem.constrained_analysis is False
         assert problem.overheating_criterion == 'ASHRAE'
         assert problem.current_generation == 0
+        assert problem.test_mode is False
+    
+    def test_init_test_mode(self):
+        """Test initialization with test mode enabled."""
+        problem = BuildingEnvelopeProblem(
+            optimization_variables=self.optimization_variables,
+            weather_file=self.weather_file,
+            constrained_analysis=False,
+            overheating_criterion='ASHRAE',
+            test_mode=True
+        )
+        
+        assert problem.test_mode is True
+        assert problem.constrained_analysis is False
+        assert problem.overheating_criterion == 'ASHRAE'
     
     def test_init_constrained_ashrae(self):
         """Test initialization of ASHRAE constrained problem."""
@@ -69,7 +85,8 @@ class TestBuildingEnvelopeProblem:
             optimization_variables=self.optimization_variables,
             weather_file=self.weather_file,
             constrained_analysis=True,
-            overheating_criterion='ASHRAE'
+            overheating_criterion='ASHRAE',
+            test_mode=False
         )
         
         assert problem.n_var == 3
@@ -77,6 +94,7 @@ class TestBuildingEnvelopeProblem:
         assert problem.n_ieq_constr == 1
         assert problem.constrained_analysis is True
         assert problem.overheating_criterion == 'ASHRAE'
+        assert problem.test_mode is False
     
     def test_init_constrained_cibse59(self):
         """Test initialization of CIBSE59 constrained problem."""
@@ -84,7 +102,8 @@ class TestBuildingEnvelopeProblem:
             optimization_variables=self.optimization_variables,
             weather_file=self.weather_file,
             constrained_analysis=True,
-            overheating_criterion='CIBSE59'
+            overheating_criterion='CIBSE59',
+            test_mode=False
         )
         
         assert problem.n_var == 3
@@ -92,12 +111,14 @@ class TestBuildingEnvelopeProblem:
         assert problem.n_ieq_constr == 2
         assert problem.constrained_analysis is True
         assert problem.overheating_criterion == 'CIBSE59'
+        assert problem.test_mode is False
     
     def test_set_generation(self):
         """Test setting generation number."""
         problem = BuildingEnvelopeProblem(
             optimization_variables=self.optimization_variables,
-            weather_file=self.weather_file
+            weather_file=self.weather_file,
+            test_mode=False
         )
         
         problem.set_generation(5)
@@ -107,7 +128,8 @@ class TestBuildingEnvelopeProblem:
         """Test that bounds are calculated correctly."""
         problem = BuildingEnvelopeProblem(
             optimization_variables=self.optimization_variables,
-            weather_file=self.weather_file
+            weather_file=self.weather_file,
+            test_mode=False
         )
         
         # Should have 3 variables
@@ -139,7 +161,8 @@ class TestBuildingEnvelopeProblem:
             shared_cache=self.shared_cache,
             weather_file=self.weather_file,
             constrained_analysis=False,
-            overheating_criterion='ASHRAE'
+            overheating_criterion='ASHRAE',
+            test_mode=False
         )
         
         # Test vector [0, 1, 0] - first wall, second roof, first window
@@ -177,7 +200,8 @@ class TestBuildingEnvelopeProblem:
             shared_cache=self.shared_cache,
             weather_file=self.weather_file,
             constrained_analysis=True,
-            overheating_criterion='ASHRAE'
+            overheating_criterion='ASHRAE',
+            test_mode=False
         )
         
         x = np.array([0, 1, 0])
@@ -207,7 +231,8 @@ class TestBuildingEnvelopeProblem:
             optimization_variables=self.optimization_variables,
             shared_cache=self.shared_cache,
             weather_file=self.weather_file,
-            constrained_analysis=False
+            constrained_analysis=False,
+            test_mode=False
         )
         
         x = np.array([0, 1, 0])
@@ -219,6 +244,38 @@ class TestBuildingEnvelopeProblem:
         assert len(out["F"]) == 2
         assert out["F"][0] == 1000.0
         assert out["F"][1] == 1000.0
+    
+    @patch('main.generate_dummy_envelope_results')
+    def test_evaluate_test_mode(self, mock_generate_dummy):
+        """Test evaluation when test mode is enabled."""
+        # Mock dummy results
+        mock_generate_dummy.return_value = {
+            'success': True,
+            'district_heating_kwh': 2590.29,  # This will give TEDI = 1.0
+            'average_overheating_hours': 25.0
+        }
+        
+        problem = BuildingEnvelopeProblem(
+            optimization_variables=self.optimization_variables,
+            shared_cache=self.shared_cache,
+            weather_file=self.weather_file,
+            constrained_analysis=False,
+            overheating_criterion='ASHRAE',
+            test_mode=True
+        )
+        
+        x = np.array([0, 1, 0])
+        out = {}
+        
+        problem._evaluate(x, out)
+        
+        # Check that dummy data was generated instead of simulation
+        mock_generate_dummy.assert_called_once()
+        
+        # Check that objectives were set correctly
+        assert len(out["F"]) == 2
+        assert out["F"][0] == 1.0  # TEDI
+        assert out["F"][1] == 25.0  # Overheating hours
     
     def test_evaluate_cached_result(self):
         """Test evaluation when result is already cached."""
@@ -301,7 +358,7 @@ class TestBuildingEnvelopeProblem:
             
             # Check constraints (should be positive when exceeding limits)
             assert len(out["G"]) == 2
-            assert out["G"][0] == 30.0   # 150 - 120 = 30
+            assert out["G"][0] == 40.0   # 150 - 110 = 40 (constraint limit is 110, not 120)
             assert out["G"][1] == 8.0    # 40 - 32 = 8
     
     def test_evaluate_with_shared_cache_none(self):
@@ -533,7 +590,8 @@ class TestMainFunction:
             n_generations=2,
             population_size=4,
             constrained_analysis=False,
-            overheating_criterion='ASHRAE'
+            overheating_criterion='ASHRAE',
+            test_mode=False
         )
         
         # Check that all expected functions were called
@@ -582,7 +640,8 @@ class TestMainFunction:
             n_generations=2,
             population_size=4,
             constrained_analysis=True,
-            overheating_criterion='CIBSE59'
+            overheating_criterion='CIBSE59',
+            test_mode=False
         )
         
         # Check that constrained optimization was set up correctly
@@ -595,6 +654,56 @@ class TestMainFunction:
         assert problem.overheating_criterion == 'CIBSE59'
         assert problem.n_obj == 1  # Single objective in constrained mode
         assert problem.n_ieq_constr == 2  # Two constraints for CIBSE59
+        assert problem.test_mode is False  # Test mode should be False
+    
+    @patch('main.print_optimization_header')
+    @patch('main.create_shared_cache')
+    @patch('main.load_optimization_variables')
+    @patch('main.load_config')
+    @patch('main.print_optimization_parameters')
+    @patch('main.EvaluationCallback')
+    @patch('main.minimize')
+    @patch('main.print_optimization_footer')
+    @patch('main.plt.show')
+    def test_main_test_mode(self, mock_plt_show, mock_footer, mock_minimize,
+                           mock_callback, mock_print_params, mock_load_config,
+                           mock_load_vars, mock_create_cache, mock_header):
+        """Test main function with test mode enabled."""
+        # Mock return values
+        mock_create_cache.return_value = {}
+        mock_load_vars.return_value = {"external_wall": ["R3 - Wall"]}
+        mock_load_config.return_value = {"num_workers": 1}
+        
+        # Mock optimization result
+        mock_result = Mock()
+        mock_result.X = [0]
+        mock_result.F = [100.0, 25.0]
+        mock_result.algorithm.evaluator.n_eval = 50
+        mock_minimize.return_value = mock_result
+        
+        # Mock callback
+        mock_callback_instance = Mock()
+        mock_callback.return_value = mock_callback_instance
+        
+        # Run main function with test mode enabled
+        main(
+            debug_mode=False,
+            n_generations=2,
+            population_size=4,
+            constrained_analysis=False,
+            overheating_criterion='ASHRAE',
+            test_mode=True
+        )
+        
+        # Check that test mode was set up correctly
+        mock_minimize.assert_called_once()
+        call_args = mock_minimize.call_args
+        problem = call_args[0][0]  # First argument is the problem
+        
+        # Should have test mode enabled
+        assert problem.test_mode is True
+        assert problem.constrained_analysis is False
+        assert problem.overheating_criterion == 'ASHRAE'
     
     @patch('main.print_optimization_header')
     @patch('main.create_shared_cache')
@@ -635,7 +744,8 @@ class TestMainFunction:
                 debug_mode=False,
                 n_generations=2,
                 population_size=4,
-                constrained_analysis=False
+                constrained_analysis=False,
+                test_mode=False
             )
             
             # Check that multiprocessing was set up
@@ -680,7 +790,8 @@ class TestMainFunction:
             mutation_prob=0.1,
             seed=12345,
             constrained_analysis=True,
-            overheating_criterion='CIBSE59'
+            overheating_criterion='CIBSE59',
+            test_mode=False
         )
         
         # Verify custom parameters were used
@@ -735,7 +846,7 @@ class TestMainFunction:
             mock_callback.return_value = mock_callback_instance
             
             # Run without seed
-            main()
+            main(test_mode=False)
             
             # Verify seed was generated
             mock_minimize.assert_called_once()

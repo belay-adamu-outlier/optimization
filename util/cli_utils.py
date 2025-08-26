@@ -17,6 +17,10 @@ def get_interactive_arguments():
     print("=" * 60)
     print("Please provide the following parameters. Press Enter to use default values.\n")
     
+    # Test mode selection
+    test_mode = _get_boolean_input("Enable test mode (use dummy data instead of EnergyPlus simulations)", False, "test mode")
+    print(f"Test mode: {'Enabled' if test_mode else 'Disabled'}\n")
+    
     # Weather file selection
     weather_file = _get_weather_file_choice()
     print(f"Selected weather file: {weather_file}\n")
@@ -56,7 +60,7 @@ def get_interactive_arguments():
     print(f"Random seed: {seed if seed is not None else 'Auto-generated'}\n")
     
     # Summary and confirmation
-    _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed)
+    _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed, test_mode)
     
     return {
         'weather': weather_file,
@@ -67,7 +71,8 @@ def get_interactive_arguments():
         'crossover_prob': crossover_prob,
         'mutation_prob': mutation_prob,
         'debug': debug_mode,
-        'seed': seed
+        'seed': seed,
+        'test_mode': test_mode
     }
 
 
@@ -177,11 +182,12 @@ def _get_seed_input():
         return None
 
 
-def _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed):
+def _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed, test_mode):
     """Print parameter summary and get user confirmation."""
     print("=" * 60)
     print("OPTIMIZATION PARAMETERS SUMMARY")
     print("=" * 60)
+    print(f"Test Mode: {'Enabled' if test_mode else 'Disabled'}")
     print(f"Weather File: {weather_file}")
     print(f"Constrained Analysis: {'Enabled' if constrained_analysis else 'Disabled'}")
     if constrained_analysis:

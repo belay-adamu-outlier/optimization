@@ -37,7 +37,8 @@ from util.data_utils import (
     load_config,
     print_generation_summary,
     print_optimization_parameters,
-    print_final_results
+    print_final_results,
+    generate_dummy_envelope_results
 )
 
 
@@ -228,7 +229,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         shared_cache=None, 
         weather_file=None,
         constrained_analysis=False,
-        overheating_criterion='ASHRAE'
+        overheating_criterion='ASHRAE',
+        test_mode=False
     ):
         n_var = len(optimization_variables)
         
@@ -241,14 +243,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             xu[i] = len(var_options) - 1
         
         # Determine number of constraints based on overheating criterion
-        if constrained_analysis:
-            if overheating_criterion.upper() == 'CIBSE59':
-                n_ieq_constr = 2  # max_living_room_overheating and max_bedroom_overheating
-            else:
-                n_ieq_constr = 1  # max_overheating_hours for ASHRAE
-        else:
-            n_ieq_constr = 0
-            
+        n_ieq_constr = 0 if not constrained_analysis else 1 if overheating_criterion.upper() == 'ASHRAE' else 2
+
         super().__init__(
             n_var=n_var,
             n_obj= 1 if constrained_analysis else 2,
@@ -265,6 +261,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         self.current_generation = 0  # Track current generation
         self.constrained_analysis = constrained_analysis
         self.overheating_criterion = overheating_criterion
+        self.test_mode = test_mode
 
     def set_generation(self, generation):
         """Set the current generation number for tracking purposes."""
@@ -298,115 +295,65 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                             out["G"] = [max_overheating_hours - 30]
                     return
             
-            # This is a new combination - run simulation
+            # This is a new combination - run simulation or generate dummy data
             process_id = os.getpid()
             
-            # DUMMY SIMULATION CODE FOR TESTING - COMMENTED OUT FOR REAL SIMULATION
-            # import random
-            # import time
-            # # Simulate some computation time
-            # time.sleep(0.01)  # Reduced for faster testing
-            # # Generate dummy results based on parameters
-            # # Convert all parameter values to numbers for calculation
-            # param_values = []
-            # for value in params.values():
-            #     if isinstance(value, (int, float)):
-            #         param_values.append(value)
-            #     elif isinstance(value, str):
-            #         # For string values, use their length as a numeric value
-            #         param_values.append(len(value))
-            #     else:
-            #         param_values.append(0)
-            # 
-            # # Generate dummy results based on overheating criterion
-            # if self.overheating_criterion.upper() == 'CIBSE59':
-            #     # CIBSE59 dummy results
-            #     tedi = random.uniform(50, 200) + sum(param_values) * 10
-            #     average_overheating = random.uniform(0, 50) + sum(param_values) * 2
-            #     max_living_room_overheating = random.uniform(20, 40) + sum(param_values) * 1
-            #     max_bedroom_overheating = random.uniform(15, 35) + sum(param_values) * 1
-            #     max_overheating_hours = max(max_living_room_overheating, max_bedroom_overheating)
-            # else:
-            #     # ASHRAE dummy results
-            #     tedi = random.uniform(50, 200) + sum(param_values) * 10
-            #     average_overheating = random.uniform(0, 100) + sum(param_values) * 5
-            #     max_overheating_hours = random.uniform(0, 80) + sum(param_values) * 3
-            #     max_living_room_overheating = None
-            #     max_bedroom_overheating = None
-            # 
-            # objective_values = [tedi, average_overheating]
-            # REAL SIMULATION CODE - UNCOMMENTED FOR ACTUAL ENERGYPLUS SIMULATIONS
-            
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-            
-            output_dir = run_simulation(
-                idf_path="Building.idf",
-                weather_path=self.weather_file,
-                envelope_parameters=params,
-                idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
-                output_dir=f"simulation_output_{timestamp}_pid{process_id}",
-                verbose='q'
-            )
-            
-            results = analyze_simulation_results(output_dir, overheating_criterion=self.overheating_criterion)
+            if self.test_mode:
+                # Use dummy data for testing - just mock the simulation outputs
+                results = generate_dummy_envelope_results(params, self.overheating_criterion)
+            else:
+                # REAL SIMULATION CODE - Run actual EnergyPlus simulation
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+                
+                output_dir = run_simulation(
+                    idf_path="Building.idf",
+                    weather_path=self.weather_file,
+                    envelope_parameters=params,
+                    idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
+                    output_dir=f"simulation_output_{timestamp}_pid{process_id}",
+                    verbose='q'
+                )
+                
+                results = analyze_simulation_results(output_dir, overheating_criterion=self.overheating_criterion)
             
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
                 thermal_energy_demand_intensity = district_heating / 2590.29
-                
-                # Handle different overheating criteria
-                if self.overheating_criterion.upper() == 'CIBSE59':
-                    max_living_room_overheating = results.get('max_living_room_overheating', 0.0) or 0.0
-                    max_bedroom_overheating = results.get('max_bedroom_overheating', 0.0) or 0.0
-                    max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
-                else:
-                    max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
-                    max_living_room_overheating = None
-                    max_bedroom_overheating = None
+                max_living_room_overheating = results.get('max_living_room_overheating', 0.0) or 0.0
+                max_bedroom_overheating = results.get('max_bedroom_overheating', 0.0) or 0.0
+                max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0  # Not used for CIBSE59 but required by set_in_cache
                 
                 objective_values = [thermal_energy_demand_intensity, average_overheating]
             else:
                 objective_values = [1000.0, 1000.0]
-                if self.overheating_criterion.upper() == 'CIBSE59':
-                    max_living_room_overheating = 1000.0
-                    max_bedroom_overheating = 1000.0
-                    max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
-                else:
-                    max_overheating_hours = 1000.0
-                    max_living_room_overheating = None
-                    max_bedroom_overheating = None
+                max_living_room_overheating = 1000.0
+                max_bedroom_overheating = 1000.0
+                max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
             
             # Store results in shared cache
             if self.shared_cache is not None:
-                if self.overheating_criterion.upper() == 'CIBSE59':
-                    set_in_cache(
-                        self.shared_cache, 
-                        combination_key, 
-                        objective_values, 
-                        max_overheating_hours, 
-                        generation=self.current_generation,
-                        params=params,
-                        max_living_room_overheating=max_living_room_overheating,
-                        max_bedroom_overheating=max_bedroom_overheating
-                    )
-                else:
-                    set_in_cache(
-                        self.shared_cache, 
-                        combination_key, 
-                        objective_values, 
-                        max_overheating_hours, 
-                        generation=self.current_generation,
-                        params=params
-                    )
+                set_in_cache(
+                    self.shared_cache, 
+                    combination_key, 
+                    objective_values, 
+                    max_overheating_hours, 
+                    generation=self.current_generation,
+                    params=params,
+                    max_living_room_overheating=max_living_room_overheating,
+                    max_bedroom_overheating=max_bedroom_overheating
+                )
             
             out["F"] = objective_values if not self.constrained_analysis else [objective_values[0]]
-            if self.constrained_analysis:
-                if self.overheating_criterion.upper() == 'CIBSE59':
-                    out["G"] = [max_living_room_overheating - 120, max_bedroom_overheating - 32]
-                else:
-                    out["G"] = [max_overheating_hours - 30]
+            
+            if not self.constrained_analysis:
+                return
+            
+            if self.overheating_criterion.upper() == 'CIBSE59':
+                out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32]
+            else:
+                out["G"] = [max_overheating_hours - 30]
             
         except Exception as e:
             out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
@@ -427,7 +374,8 @@ def main(
     mutation_prob=None, 
     seed=None,
     constrained_analysis=False,
-    overheating_criterion='ASHRAE'
+    overheating_criterion='ASHRAE',
+    test_mode=False
 ):
     # Print optimization header
     print_optimization_header()
@@ -439,6 +387,9 @@ def main(
     
     if debug_mode:
         print("DEBUG MODE: Shared cache will be preserved for inspection")
+    
+    if test_mode:
+        print("TEST MODE: Using dummy data instead of EnergyPlus simulations")
     
     # Load optimization variables
     optimization_variables = load_optimization_variables()
@@ -460,7 +411,8 @@ def main(
         print(f"Initialized multiprocessing pool with {num_workers} workers")
     else:
         pool = None
-        runner = None
+        # For single-threaded mode, create a simple runner that processes sequentially
+        runner = StarmapParallelization(lambda func, args: [func(*arg) for arg in args])
         print("Running in single-threaded mode")
     
     # Define problem - pass shared cache to all worker processes
@@ -470,7 +422,8 @@ def main(
         shared_cache=shared_cache,
         weather_file=weather_file,
         constrained_analysis=constrained_analysis,
-        overheating_criterion=overheating_criterion
+        overheating_criterion=overheating_criterion,
+        test_mode=test_mode
     )
     
     # Generate seed if not provided
@@ -494,7 +447,8 @@ def main(
         'Debug_Mode': debug_mode,
         'Seed': seed,
         'Constrained_Analysis': constrained_analysis,
-        'Overheating_Criterion': overheating_criterion
+        'Overheating_Criterion': overheating_criterion,
+        'Test_Mode': test_mode
     }
     
     # Print optimization parameters
@@ -565,5 +519,6 @@ if __name__ == "__main__":
         mutation_prob=args['mutation_prob'],
         seed=args['seed'],
         constrained_analysis=args['constrained_analysis'],
-        overheating_criterion=args['overheating_criterion']
+        overheating_criterion=args['overheating_criterion'],
+        test_mode=args['test_mode']
     ) 

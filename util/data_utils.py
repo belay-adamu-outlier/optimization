@@ -644,8 +644,7 @@ def initialize_envelope_optimization_plot(constrained_analysis=False, overheatin
         ax.set_title('Building Envelope Optimization - Multi-Objective')
     
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(0, 1000)  # Will be auto-adjusted based on data
-    ax.set_ylim(0, 1000)  # Will be auto-adjusted based on data
+    # Let matplotlib auto-scale based on actual data
     
     # Create scatter plots for all solutions and Pareto optimal solutions
     scatter_all = ax.scatter([], [], c='blue', alpha=0.6, s=30, label='All Solutions')
@@ -704,6 +703,18 @@ def update_envelope_optimization_plot(solutions_by_key, generation, fig, ax, sca
         # Auto-adjust limits
         ax.relim()
         ax.autoscale_view()
+        
+        # Manually set reasonable limits if auto-scaling fails
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        
+        if abs(xlim[0]) < 0.1 and abs(xlim[1]) < 0.1:  # If limits are around 0
+            tedi_margin = (max(tedi_values) - min(tedi_values)) * 0.1
+            ax.set_xlim(min(tedi_values) - tedi_margin, max(tedi_values) + tedi_margin)
+        
+        if abs(ylim[0]) < 0.1 and abs(ylim[1]) < 0.1:  # If limits are around 0
+            overheating_margin = (max(overheating_values) - min(overheating_values)) * 0.1
+            ax.set_ylim(min(overheating_values) - overheating_margin, max(overheating_values) + overheating_margin)
         
         # Update title with generation info
         current_title = ax.get_title()
@@ -977,6 +988,61 @@ def generate_dummy_shading_results(shading_schedule):
         'success': True,
         'district_heating_kwh': tedi * 2590.29,  # Convert back to kWh
         'average_overheating_hours': average_overheating,
+        'max_living_room_overheating': max_living_room_overheating,
+        'max_bedroom_overheating': max_bedroom_overheating
+    }
+
+
+def generate_dummy_envelope_results(params, overheating_criterion='ASHRAE'):
+    """
+    Generate dummy simulation results for envelope optimization testing.
+    
+    Args:
+        params (dict): Dictionary containing envelope parameters
+        overheating_criterion (str): Either 'ASHRAE' or 'CIBSE59'
+        
+    Returns:
+        dict: Dictionary containing dummy simulation results
+    """
+    import random
+    import time
+    
+    # Simulate some computation time
+    time.sleep(0.01)  # Small delay to simulate computation
+    
+    # Generate dummy results based on parameters
+    # Convert all parameter values to numbers for calculation
+    param_values = []
+    for value in params.values():
+        if isinstance(value, (int, float)):
+            param_values.append(value)
+        elif isinstance(value, str):
+            # For string values, use their length as a numeric value
+            param_values.append(len(value))
+        else:
+            param_values.append(0)
+    
+    # Generate dummy results based on overheating criterion
+    if overheating_criterion.upper() == 'CIBSE59':
+        # CIBSE59 dummy results
+        district_heating = random.uniform(500, 2000) + sum(param_values) * 100
+        average_overheating = random.uniform(0, 50) + sum(param_values) * 2
+        max_living_room_overheating = random.uniform(20, 40) + sum(param_values) * 1
+        max_bedroom_overheating = random.uniform(15, 35) + sum(param_values) * 1
+        max_overheating_hours = max(max_living_room_overheating, max_bedroom_overheating)
+    else:
+        # ASHRAE dummy results
+        district_heating = random.uniform(500, 2000) + sum(param_values) * 100
+        average_overheating = random.uniform(0, 100) + sum(param_values) * 5
+        max_overheating_hours = random.uniform(0, 80) + sum(param_values) * 3
+        max_living_room_overheating = None
+        max_bedroom_overheating = None
+    
+    return {
+        'success': True,
+        'district_heating_kwh': district_heating,
+        'average_overheating_hours': average_overheating,
+        'max_overheating_hours': max_overheating_hours,
         'max_living_room_overheating': max_living_room_overheating,
         'max_bedroom_overheating': max_bedroom_overheating
     }
