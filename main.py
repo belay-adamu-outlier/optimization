@@ -19,7 +19,11 @@ from util.simulation_utils import (
     set_in_cache,
     save_cache_to_file
 )
-from util.cli_utils import get_interactive_arguments, print_optimization_header, print_optimization_footer
+from util.cli_utils import (
+    get_interactive_arguments, 
+    print_optimization_header, 
+    print_optimization_footer
+)
 from util.data_utils import (
     x_to_params,
     print_optimization_table,
@@ -27,8 +31,8 @@ from util.data_utils import (
     initialize_csv,
     save_to_csv,
     save_final_results,
-    initialize_plot,
-    update_plot,
+    initialize_envelope_optimization_plot,
+    update_envelope_optimization_plot,
     load_optimization_variables,
     load_config,
     print_generation_summary,
@@ -75,7 +79,10 @@ class EvaluationCallback(Callback):
         )
         
         # Initialize plotting
-        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_plot(self.constrained_analysis, self.overheating_criterion)
+        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_envelope_optimization_plot(
+            self.constrained_analysis, 
+            self.overheating_criterion
+        )
         
         # Track cache size for calculating new evaluations
         self.previous_cache_size = 0
@@ -187,7 +194,7 @@ class EvaluationCallback(Callback):
         )
         
         # Update the plot at the end of each generation
-        update_plot(
+        update_envelope_optimization_plot(
             self.solutions_by_key, 
             self.generation, self.fig, 
             self.ax, self.scatter_all, 
