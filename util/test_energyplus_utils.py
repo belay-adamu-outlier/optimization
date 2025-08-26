@@ -17,6 +17,7 @@ from .energyplus_utils import (
     apply_wwr_to_windows,
     apply_solar_absorptance_to_surfaces,
     rename_shading_elements_by_orientation,
+    create_shading_elements_by_orientation,
     assign_shading_transmittance_schedules,
     apply_shading_schedules_to_idf,
     _expand_partial_schedule,
@@ -1451,37 +1452,24 @@ class TestCreateShadingElementsByOrientation:
             },
             'east': {
                 'overhang': {'length': 0.4},
-                'fin': {'length': 0.2}
+                'left_fin': {'length': 0.2}
             },
             'west': {
                 'overhang': {'length': 0.4},
-                'fin': {'length': 0.2}
+                'right_fin': {'length': 0.2}
             }
         }
     
     def test_create_shading_elements_by_orientation(self):
         """Test creating shading elements for different orientations."""
-        from .energyplus_utils import create_shading_elements_by_orientation
+        result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
         
-        # Mock the shading templates
-        with patch('util.energyplus_utils.get_shading_templates') as mock_get_templates:
-            mock_get_templates.return_value = {
-                'south_overhang': {'template': 'south_overhang_data'},
-                'south_right_fin': {'template': 'south_right_fin_data'},
-                'south_left_fin': {'template': 'south_left_fin_data'},
-                'east_overhang': {'template': 'east_overhang_data'},
-                'east_fin': {'template': 'east_fin_data'},
-                'west_overhang': {'template': 'west_overhang_data'},
-                'west_fin': {'template': 'west_fin_data'}
-            }
-            
-            result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
-            
-            # Verify new shading elements were created
-            assert self.mock_idf.newidfobject.call_count == 7  # 3 south + 2 east + 2 west
-            
-            # Verify IDF object is returned
-            assert result == self.mock_idf
+        # Verify new shading elements were created
+        # South: 1 overhang + 1 fin, East: 1 overhang + 1 fin, West: 1 overhang + 1 fin
+        assert self.mock_idf.newidfobject.call_count == 6
+        
+        # Verify IDF object is returned
+        assert result == self.mock_idf
     
     def test_create_shading_elements_with_missing_dimensions(self):
         """Test creating shading elements when some dimensions are missing."""
@@ -1492,24 +1480,17 @@ class TestCreateShadingElementsByOrientation:
             },
             'east': {
                 'overhang': {'length': 0.4}
-                # Missing fin
+                # Missing left_fin
             }
         }
         
-        from .energyplus_utils import create_shading_elements_by_orientation
+        result = create_shading_elements_by_orientation(self.mock_idf, incomplete_dimensions)
         
-        with patch('util.energyplus_utils.get_shading_templates') as mock_get_templates:
-            mock_get_templates.return_value = {
-                'south_overhang': {'template': 'south_overhang_data'},
-                'east_overhang': {'template': 'east_overhang_data'}
-            }
-            
-            result = create_shading_elements_by_orientation(self.mock_idf, incomplete_dimensions)
-            
-            # Should only create elements for available dimensions
-            assert self.mock_idf.newidfobject.call_count == 2  # 1 south + 1 east
-            
-            assert result == self.mock_idf
+        # Should only create elements for available dimensions
+        # South: 1 overhang, East: 1 overhang
+        assert self.mock_idf.newidfobject.call_count == 2
+        
+        assert result == self.mock_idf
     
     def test_create_shading_elements_with_no_matching_orientations(self):
         """Test creating shading elements when no fenestrations match orientations."""
@@ -1517,8 +1498,6 @@ class TestCreateShadingElementsByOrientation:
         self.mock_south_fenestration.Building_Surface_Name = 'Unrelated_Wall'
         self.mock_east_fenestration.Building_Surface_Name = 'Another_Wall'
         self.mock_west_fenestration.Building_Surface_Name = 'Third_Wall'
-        
-        from .energyplus_utils import create_shading_elements_by_orientation
         
         result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
         
@@ -1531,8 +1510,6 @@ class TestCreateShadingElementsByOrientation:
         """Test creating shading elements with empty dimensions dictionary."""
         empty_dimensions = {}
         
-        from .energyplus_utils import create_shading_elements_by_orientation
-        
         result = create_shading_elements_by_orientation(self.mock_idf, empty_dimensions)
         
         # No shading elements should be created
@@ -1542,13 +1519,30 @@ class TestCreateShadingElementsByOrientation:
     
     def test_create_shading_elements_with_none_dimensions(self):
         """Test creating shading elements with None dimensions."""
-        from .energyplus_utils import create_shading_elements_by_orientation
-        
         # Should not raise exception
         result = create_shading_elements_by_orientation(self.mock_idf, None)
         
         # No shading elements should be created
         assert self.mock_idf.newidfobject.call_count == 0
+        
+        assert result == self.mock_idf
+    
+    def test_create_shading_elements_object_types(self):
+        """Test that the correct shading object types are created."""
+        # Reset mock to track calls
+        self.mock_idf.newidfobject.reset_mock()
+        
+        result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
+        
+        # Verify that both SHADING:OVERHANG and SHADING:FIN objects are created
+        calls = self.mock_idf.newidfobject.call_args_list
+        
+        # Check that we have the right mix of object types
+        overhang_calls = [call for call in calls if call[0][0] == 'SHADING:OVERHANG']
+        fin_calls = [call for call in calls if call[0][0] == 'SHADING:FIN']
+        
+        assert len(overhang_calls) == 3  # One for each orientation
+        assert len(fin_calls) == 3       # One for each orientation
         
         assert result == self.mock_idf
 

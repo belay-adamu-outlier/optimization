@@ -309,96 +309,65 @@ def create_shading_elements_by_orientation(idf, dimensions):
         - The function handles missing dimensions gracefully by skipping those elements
     """
     fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])    
-    shading_elements = []
+    overhangs = []
+    fins = []
     
     # Handle None dimensions gracefully
     if dimensions is None:
         return idf
     
-    for orientation in dimensions:
-        overhang_dim = dimensions[orientation]['overhang']
-        right_fin_dim = dimensions[orientation].get('right_fin', None)
-        left_fin_dim = dimensions[orientation].get('left_fin', None)
-        fin_dim = dimensions[orientation].get('fin', None)
+    for fenestration in fenestrations:
+        wall_name = fenestration.Building_Surface_Name.lower()
         
-        for fenestration in fenestrations:
-            if orientation.lower() not in fenestration.Building_Surface_Name.lower():
-                continue
-            
-            min_x = min(fenestration.Vertex_1_Xcoordinate, fenestration.Vertex_2_Xcoordinate, fenestration.Vertex_3_Xcoordinate, fenestration.Vertex_4_Xcoordinate)
-            max_x = max(fenestration.Vertex_1_Xcoordinate, fenestration.Vertex_2_Xcoordinate, fenestration.Vertex_3_Xcoordinate, fenestration.Vertex_4_Xcoordinate)
-            min_y = min(fenestration.Vertex_1_Ycoordinate, fenestration.Vertex_2_Ycoordinate, fenestration.Vertex_3_Ycoordinate, fenestration.Vertex_4_Ycoordinate)
-            max_y = max(fenestration.Vertex_1_Ycoordinate, fenestration.Vertex_2_Ycoordinate, fenestration.Vertex_3_Ycoordinate, fenestration.Vertex_4_Ycoordinate)
-            min_z = min(fenestration.Vertex_1_Zcoordinate, fenestration.Vertex_2_Zcoordinate, fenestration.Vertex_3_Zcoordinate, fenestration.Vertex_4_Zcoordinate)
-            max_z = max(fenestration.Vertex_1_Zcoordinate, fenestration.Vertex_2_Zcoordinate, fenestration.Vertex_3_Zcoordinate, fenestration.Vertex_4_Zcoordinate)
-            
-            
-            templates = get_shading_templates(min_x, min_y, max_x, max_y, min_z, max_z)
-            
-            if orientation.lower() == 'south':
-                # Always create overhang if overhang_dim is available
-                shading_elements.append({
-                    'Name': f'South Overhang {len(shading_elements) + 1}',
-                    **templates['south_overhang'],
-                    'Vertex_2_Ycoordinate': min_y - overhang_dim['length'],
-                    'Vertex_3_Ycoordinate': min_y - overhang_dim['length'],
+        if 'south' in wall_name and 'south' in dimensions:
+            if 'overhang' in dimensions['south']:
+                overhangs.append({
+                    'Name': f'South Overhang {len(overhangs) + 1}',
+                    'Window_or_Door_Name': fenestration.Name,
+                    'Depth': dimensions['south']['overhang']['length']
                 })
-                
-                # Only create right fin if right_fin_dim is available
-                if right_fin_dim is not None:
-                    shading_elements.append({
-                        'Name': f'South Right Fin {len(shading_elements) + 1}',
-                        **templates['south_right_fin'],
-                        'Vertex_1_Ycoordinate': min_y - right_fin_dim['length'],
-                        'Vertex_4_Ycoordinate': min_y - right_fin_dim['length'],
-                    })
-                
-                # Only create left fin if left_fin_dim is available
-                if left_fin_dim is not None:
-                    shading_elements.append({
-                        'Name': f'South Left Fin {len(shading_elements) + 1}',
-                        **templates['south_left_fin'],
-                        'Vertex_3_Ycoordinate': min_y - left_fin_dim['length'],
-                        'Vertex_4_Ycoordinate': min_y - left_fin_dim['length'],
-                    })
-            elif orientation.lower() == 'east':
-                # Always create overhang if overhang_dim is available
-                shading_elements.append({
-                    'Name': f'East Overhang {len(shading_elements) + 1}',
-                    **templates['east_overhang'],
-                    'Vertex_3_Xcoordinate': min_x + overhang_dim['length'],
-                    'Vertex_4_Xcoordinate': min_x + overhang_dim['length'],
+            if 'right_fin' in dimensions['south'] and 'left_fin' in dimensions['south']:
+                fins.append({
+                    'Name': f'South Fin {len(fins) + 1}',
+                    'Window_or_Door_Name': fenestration.Name,
+                    'Left_Depth': dimensions['south']['right_fin']['length'],
+                    'Right_Depth': dimensions['south']['left_fin']['length']
                 })
-                
-                # Only create fin if fin_dim is available
-                if fin_dim is not None:
-                    shading_elements.append({
-                        'Name': f'East Fin {len(shading_elements) + 1}',
-                        **templates['east_fin'],
-                        'Vertex_3_Xcoordinate': min_x + fin_dim['length'],
-                        'Vertex_4_Xcoordinate': min_x + fin_dim['length'],
-                    })
-            elif orientation.lower() == 'west':
-                # Always create overhang if overhang_dim is available
-                shading_elements.append({
-                    'Name': f'West Overhang {len(shading_elements) + 1}',
-                    **templates['west_overhang'],
-                    'Vertex_2_Xcoordinate': min_x - overhang_dim['length'],
-                    'Vertex_3_Xcoordinate': max_x - overhang_dim['length'],
+        if 'west' in wall_name and 'west' in dimensions:
+            if 'overhang' in dimensions['west']:
+                overhangs.append({
+                    'Name': f'West Overhang {len(overhangs) + 1}',
+                    'Window_or_Door_Name': fenestration.Name,
+                    'Depth': dimensions['west']['overhang']['length']
                 })
-                
-                # Only create fin if fin_dim is available
-                if fin_dim is not None:
-                    shading_elements.append({
-                        'Name': f'West Fin {len(shading_elements) + 1}',
-                        **templates['west_fin'],
-                        'Vertex_2_Xcoordinate': min_x - fin_dim['length'],
-                        'Vertex_3_Xcoordinate': min_x - fin_dim['length']
-                    })
+            if 'right_fin' in dimensions['west']:
+                fins.append({
+                    'Name': f'West Fin {len(fins) + 1}',
+                    'Window_or_Door_Name': fenestration.Name,
+                    'Right_Depth': dimensions['west']['right_fin']['length']
+                })
+        if 'east' in wall_name and 'east' in dimensions:
+            if 'overhang' in dimensions['east']:
+                overhangs.append({
+                    'Name': f'East Overhang {len(overhangs) + 1}',
+                    'Window_or_Door_Name': fenestration.Name,
+                    'Depth': dimensions['east']['overhang']['length']
+                })
+            if 'left_fin' in dimensions['east']:
+                fins.append({
+                    'Name': f'East Fin {len(fins) + 1}',
+                    'Window_or_Door_Name': fenestration.Name,
+                    'Left_Depth': dimensions['east']['left_fin']['length']
+                })
     
-    for shading_element in shading_elements:
-        new_shading_element = idf.newidfobject('SHADING:BUILDING:DETAILED')
-        for key, value in shading_element.items():
+    for overhang in overhangs:
+        new_shading_element = idf.newidfobject('SHADING:OVERHANG')
+        for key, value in overhang.items():
+            setattr(new_shading_element, key, value)
+            
+    for fin in fins:
+        new_shading_element = idf.newidfobject('SHADING:FIN')
+        for key, value in fin.items():
             setattr(new_shading_element, key, value)
     
     return idf
