@@ -6,7 +6,7 @@ from pymoo.core.problem import ElementwiseProblem, StarmapParallelization
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.operators.repair.rounding import RoundingRepair
-from pymoo.operators.sampling.rnd import IntegerRandomSampling
+from pymoo.operators.sampling.rnd import IntegerRandomSampling, FloatRandomSampling
 from pymoo.optimize import minimize
 from pymoo.core.callback import Callback
 import os
@@ -25,7 +25,6 @@ from util.cli_utils import (
     print_optimization_footer
 )
 from util.data_utils import (
-    x_to_params,
     print_optimization_table,
     update_pareto_optimality_for_display,
     initialize_csv,
@@ -33,12 +32,19 @@ from util.data_utils import (
     save_final_results,
     initialize_envelope_optimization_plot,
     update_envelope_optimization_plot,
-    load_optimization_variables,
+    initialize_shading_optimization_plot,
+    update_shading_optimization_plot,
     load_config,
     print_generation_summary,
     print_optimization_parameters,
     print_final_results,
-    generate_dummy_envelope_results
+    generate_dummy_envelope_results,
+    generate_dummy_shading_results
+)
+from util.pymoo_utils import (
+    get_optimization_variables, 
+    get_problem_constraints, 
+    get_x_to_params_function
 )
 
 
@@ -49,6 +55,7 @@ class EvaluationCallback(Callback):
         shared_cache=None, 
         debug_mode=False, 
         metadata=None,
+        optimization_type='envelope',
         constrained_analysis=False,
         overheating_criterion='ASHRAE'
     ):
@@ -57,9 +64,23 @@ class EvaluationCallback(Callback):
         self.shared_cache = shared_cache
         self.debug_mode = debug_mode
         self.metadata = metadata or {}
+        self.optimization_type = optimization_type
         self.generation = 0
         self.constrained_analysis = constrained_analysis
         self.overheating_criterion = overheating_criterion
+        
+        # Set objective names and multiobjective flag for shading optimization
+        if optimization_type == 'shading':
+            self.objective_names = [
+                'Thermal_Energy_Demand_Intensity',
+                'Max_Living_Room_Overheating',
+                'Max_Bedroom_Overheating'
+            ]
+            self.multiobjective = True
+        else:
+            self.objective_names = None
+            self.multiobjective = not constrained_analysis
+        
         # Use dictionaries for efficient lookups instead of lists
         self.solutions_by_key = {}  # combination_key -> solution_dict
         self.solutions_by_generation = {}  # generation -> list of combination_keys
@@ -70,20 +91,27 @@ class EvaluationCallback(Callback):
         
         # Initialize CSV file
         self.csv_filename = f"optimization_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
         initialize_csv(
             self.csv_filename,
             self.metadata,
             variable_names=self.variable_names,
-            problem_type='envelope',
+            problem_type=self.optimization_type,
             constrained_analysis=self.constrained_analysis,
             overheating_criterion=self.overheating_criterion
         )
         
-        # Initialize plotting
-        self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_envelope_optimization_plot(
-            self.constrained_analysis, 
-            self.overheating_criterion
-        )
+        # Initialize plotting based on optimization type
+        if self.optimization_type == 'shading':
+            self.fig, self.axes, self.scatter_all, self.scatter_pareto = initialize_shading_optimization_plot(
+                self.constrained_analysis, 
+                self.overheating_criterion
+            )
+        else:
+            self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_envelope_optimization_plot(
+                self.constrained_analysis, 
+                self.overheating_criterion
+            )
         
         # Track cache size for calculating new evaluations
         self.previous_cache_size = 0
@@ -121,8 +149,7 @@ class EvaluationCallback(Callback):
                     params = cache_entry.get('params') # Get parameters from cache entry
                     iteration = i + 1
                     max_overheating_hours = cache_entry.get('max_overheating_hours')
-                
-                tedi, overheating = objectives
+                    tedi, overheating = objectives
                 
                 # Create solution dictionary
                 solution_dict = {
@@ -138,10 +165,19 @@ class EvaluationCallback(Callback):
                     solution_dict['max_living_room_overheating'] = cache_entry.get('max_living_room_overheating', 0.0)
                     solution_dict['max_bedroom_overheating'] = cache_entry.get('max_bedroom_overheating', 0.0)
                 
-                # Add parameters (we need to reconstruct from key)
+                # For shading optimization, always add these values regardless of overheating criterion
+                if self.optimization_type == 'shading':
+                    solution_dict['max_living_room_overheating'] = cache_entry.get('max_living_room_overheating', 0.0)
+                    solution_dict['max_bedroom_overheating'] = cache_entry.get('max_bedroom_overheating', 0.0)
+                    solution_dict['total_shading_area'] = cache_entry.get('total_shading_area', 0.0)
+                
+                # Add optimization variables from params
                 if params:
                     for var_name in self.variable_names:
-                        solution_dict[var_name] = params.get(var_name, "N/A")
+                        if var_name in params:
+                            solution_dict[var_name] = params[var_name]
+                        else:
+                            solution_dict[var_name] = "N/A"
                 else:
                     for var_name in self.variable_names:
                         solution_dict[var_name] = "N/A"  # Placeholder
@@ -170,19 +206,22 @@ class EvaluationCallback(Callback):
             self.variable_names, 
             self.generation,
             self.constrained_analysis,
-            self.overheating_criterion
+            self.overheating_criterion,
+            self.optimization_type
         )
         
-        # Save current generation results to CSV
+        # Save all results found so far to CSV (not just current generation)
         save_to_csv(
             self.csv_filename, 
             self.solutions_by_generation, 
             self.solutions_by_key, 
             self.variable_names, 
-            self.generation,
-            problem_type='envelope',
+            None,  # Pass None to save all generations
+            problem_type=self.optimization_type,
             constrained_analysis=self.constrained_analysis,
-            overheating_criterion=self.overheating_criterion
+            overheating_criterion=self.overheating_criterion,
+            objective_names=self.objective_names,
+            multiobjective=self.multiobjective
         )
                 
         # Print efficiency info
@@ -195,14 +234,21 @@ class EvaluationCallback(Callback):
         )
         
         # Update the plot at the end of each generation
-        update_envelope_optimization_plot(
-            self.solutions_by_key, 
-            self.generation, self.fig, 
-            self.ax, self.scatter_all, 
-            self.scatter_pareto,
-            self.constrained_analysis,
-            self.overheating_criterion
-        )
+        plot_args = {
+            'solutions_by_key': self.solutions_by_key, 
+            'generation': self.generation, 
+            'fig': self.fig, 
+            'axes': self.axes,
+            'scatter_all': self.scatter_all,
+            'scatter_pareto': self.scatter_pareto,
+            'constrained_analysis': self.constrained_analysis, 
+            'overheating_criterion': self.overheating_criterion
+        }
+        
+        if self.optimization_type == 'shading':
+            update_shading_optimization_plot(**plot_args)
+        else:
+            update_envelope_optimization_plot(**plot_args)
 
         # Save cache at the end of each generation if in debug mode
         if self.debug_mode and self.shared_cache is not None:
@@ -215,9 +261,11 @@ class EvaluationCallback(Callback):
             self.solutions_by_key, 
             self.variable_names, 
             self.metadata,
-            problem_type='envelope',
+            problem_type=self.optimization_type,
             constrained_analysis=self.constrained_analysis,
-            overheating_criterion=self.overheating_criterion
+            overheating_criterion=self.overheating_criterion,
+            objective_names=self.objective_names,
+            multiobjective=self.multiobjective
         )
 
 
@@ -228,22 +276,29 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         elementwise_runner=None, 
         shared_cache=None, 
         weather_file=None,
+        optimization_type='envelope',
         constrained_analysis=False,
         overheating_criterion='ASHRAE',
         test_mode=False
     ):
         n_var = len(optimization_variables)
         
-        # Set the lower bounds for each variable
-        xl = np.zeros(n_var, dtype=int)
+        # Set variable bounds based on optimization type
+        if optimization_type == 'shading':
+            # For shading optimization, use continuous variables with float bounds
+            xl = np.array([bounds['min'] for bounds in optimization_variables.values()], dtype=float)
+            xu = np.array([bounds['max'] for bounds in optimization_variables.values()], dtype=float)
+            vtype = float
+        else:
+            # For envelope optimization, use discrete indices
+            xl = np.zeros(n_var, dtype=int)
+            xu = np.zeros(n_var, dtype=int)
+            for i, (var_name, var_options) in enumerate(optimization_variables.items()):
+                xu[i] = len(var_options) - 1
+            vtype = int
         
-        # Set the upper bounds for each variable
-        xu = np.zeros(n_var, dtype=int)
-        for i, (var_name, var_options) in enumerate(optimization_variables.items()):
-            xu[i] = len(var_options) - 1
-        
-        # Determine number of constraints based on overheating criterion
-        n_ieq_constr = 0 if not constrained_analysis else 1 if overheating_criterion.upper() == 'ASHRAE' else 2
+        # Determine number of constraints based on optimization type and overheating criterion
+        n_ieq_constr = get_problem_constraints(optimization_type, constrained_analysis, overheating_criterion)
 
         super().__init__(
             n_var=n_var,
@@ -251,13 +306,14 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             n_ieq_constr=n_ieq_constr,
             xl=xl,
             xu=xu,
-            vtype=int,
+            vtype=vtype,
             elementwise_runner=elementwise_runner
         )
         
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
         self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
+        self.optimization_type = optimization_type
         self.current_generation = 0  # Track current generation
         self.constrained_analysis = constrained_analysis
         self.overheating_criterion = overheating_criterion
@@ -270,8 +326,9 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
     def _evaluate(self, x, out, *args, **kwargs):
         try:
             
-            params = x_to_params(x, self.optimization_variables)
-            
+            # Get the appropriate parameter conversion function based on optimization type
+            x_to_params_func = get_x_to_params_function(self.optimization_type)
+            params = x_to_params_func(x, self.optimization_variables)            
             # Create unique key for this combination
             combination_key = make_cache_key(params)
             
@@ -300,29 +357,37 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             
             if self.test_mode:
                 # Use dummy data for testing - just mock the simulation outputs
-                results = generate_dummy_envelope_results(params, self.overheating_criterion)
+                if self.optimization_type == 'shading':
+                    results = generate_dummy_shading_results(params, self.overheating_criterion)
+                else:
+                    results = generate_dummy_envelope_results(params, self.overheating_criterion)
             else:
                 # REAL SIMULATION CODE - Run actual EnergyPlus simulation
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 
                 output_dir = run_simulation(
-                    idf_path="Building.idf",
+                    idf_path="Building_SW_Shading_Renamed.idf",
                     weather_path=self.weather_file,
-                    envelope_parameters=params,
+                    params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
                     output_dir=f"simulation_output_{timestamp}_pid{process_id}",
                     verbose='q'
                 )
                 
-                results = analyze_simulation_results(output_dir, overheating_criterion=self.overheating_criterion)
+                results = analyze_simulation_results(
+                    output_dir, 
+                    overheating_criterion=self.overheating_criterion, 
+                    cleanup=True
+                )
             
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 average_overheating = results['average_overheating_hours'] or 0.0
-                thermal_energy_demand_intensity = district_heating / 2590.29
+                thermal_energy_demand_intensity = district_heating / 271.24
                 max_living_room_overheating = results.get('max_living_room_overheating', 0.0) or 0.0
                 max_bedroom_overheating = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0  # Not used for CIBSE59 but required by set_in_cache
+                total_shading_area = results.get('total_shading_area', 0.0) or 0.0
                 
                 objective_values = [thermal_energy_demand_intensity, average_overheating]
             else:
@@ -330,6 +395,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 max_living_room_overheating = 1000.0
                 max_bedroom_overheating = 1000.0
                 max_overheating_hours = 0.0  # Not used for CIBSE59 but required by set_in_cache
+                total_shading_area = 1000.0
                 print(f"Simulation failed: {results.get('error', 'Unknown error')}")
             
             # Store results in shared cache
@@ -342,7 +408,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     generation=self.current_generation,
                     params=params,
                     max_living_room_overheating=max_living_room_overheating,
-                    max_bedroom_overheating=max_bedroom_overheating
+                    max_bedroom_overheating=max_bedroom_overheating,
+                    total_shading_area=total_shading_area
                 )
             
             out["F"] = objective_values if not self.constrained_analysis else [objective_values[0]]
@@ -350,22 +417,32 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             if not self.constrained_analysis:
                 return
             
-            if self.overheating_criterion.upper() == 'CIBSE59':
-                out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32]
+            if self.optimization_type == 'shading':
+                    out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32, total_shading_area - 0]
             else:
-                out["G"] = [max_overheating_hours - 30]
+                if self.overheating_criterion.upper() == 'CIBSE59':
+                    out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32]
+                else:
+                    out["G"] = [max_overheating_hours - 30]
             
         except Exception as e:
             out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
             if self.constrained_analysis:
-                if self.overheating_criterion.upper() == 'CIBSE59':
-                    out["G"] = [1000.0, 1000.0]  # Two constraints for CIBSE59
+                if self.optimization_type == 'shading':
+                    if self.overheating_criterion.upper() == 'CIBSE59':
+                        out["G"] = [1000.0, 1000.0, 1000.0]  # Three constraints for shading CIBSE59
+                    else:
+                        out["G"] = [1000.0, 1000.0]  # Two constraints for shading ASHRAE
                 else:
-                    out["G"] = [1000.0]  # One constraint for ASHRAE
+                    if self.overheating_criterion.upper() == 'CIBSE59':
+                        out["G"] = [1000.0, 1000.0]  # Two constraints for envelope CIBSE59
+                    else:
+                        out["G"] = [1000.0]  # One constraint for envelope ASHRAE
             print(f"Error evaluating individual: {str(e)}")
 
 
 def main(
+    optimization_type='envelope',
     debug_mode=False, 
     weather_file=None, 
     n_generations=None, 
@@ -391,8 +468,8 @@ def main(
     if test_mode:
         print("TEST MODE: Using dummy data instead of EnergyPlus simulations")
     
-    # Load optimization variables
-    optimization_variables = load_optimization_variables()
+    # Load optimization variables based on optimization type
+    optimization_variables = get_optimization_variables(optimization_type)
     
     # Load config
     config = load_config()
@@ -421,6 +498,7 @@ def main(
         elementwise_runner=runner, 
         shared_cache=shared_cache,
         weather_file=weather_file,
+        optimization_type=optimization_type,
         constrained_analysis=constrained_analysis,
         overheating_criterion=overheating_criterion,
         test_mode=test_mode
@@ -438,6 +516,7 @@ def main(
     # Create metadata for CSV
     metadata = {
         'Algorithm': 'NSGA-II',
+        'Optimization_Type': optimization_type,
         'Weather_File': weather_file or "Vancouver - 2021 AMY.epw",
         'Number_of_Generations': n_generations or 100,
         'Crossover_Probability': crossover_prob or 0.5,
@@ -460,18 +539,24 @@ def main(
         shared_cache=shared_cache, 
         debug_mode=debug_mode, 
         metadata=metadata,
+        optimization_type=optimization_type,
         constrained_analysis=constrained_analysis,
         overheating_criterion=overheating_criterion
     )
     
     # Define algorithm with built-in duplicate elimination and seeding
-    method = NSGA2(
-        pop_size=population_size or 50,
-        sampling=IntegerRandomSampling(),
-        crossover=SBX(prob=crossover_prob or 0.5, eta=5, vtype=float, repair=RoundingRepair()),
-        mutation=PM(prob=mutation_prob or 0.125, eta=5, vtype=float, repair=RoundingRepair()),
-        eliminate_duplicates=True
-    )
+    vtype = float if optimization_type == 'shading' else int
+    repair = RoundingRepair() if optimization_type == 'envelope' else None
+    
+    nsga2_args = {
+        'pop_size': population_size or 50,
+        'sampling': FloatRandomSampling() if optimization_type == 'shading' else IntegerRandomSampling(),
+        'crossover': SBX(prob=crossover_prob or 0.5, eta=5, vtype=vtype, repair=repair),
+        'mutation': PM(prob=mutation_prob or 0.125, eta=5, vtype=vtype, repair=repair),
+        'eliminate_duplicates': True
+    }
+    
+    method = NSGA2(**nsga2_args)
     
     # Run optimization with seed
     res = minimize(
@@ -511,6 +596,7 @@ if __name__ == "__main__":
     
     # Run main function with parsed arguments
     main(
+        optimization_type=args['optimization_type'],
         debug_mode=args['debug'],
         weather_file=args['weather'],
         n_generations=args['generations'],
