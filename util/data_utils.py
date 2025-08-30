@@ -80,7 +80,8 @@ def print_optimization_table(
     variable_names, 
     generation, 
     constrained_analysis=False,
-    overheating_criterion='ASHRAE'
+    overheating_criterion='ASHRAE',
+    problem_type='envelope'
 ):
 
     """Print a formatted table of optimization results."""
@@ -125,18 +126,18 @@ def print_optimization_table(
                 name = name[:5] + "..."
             header_parts.append(f"{name:<{max_width}}")
     
-    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-        header_parts.extend([
-            f"{'Mech_EUI':<8}",
+    header_parts.extend([
+            f"{'TEDI':<8}",
             f"{'Max_LR_OH':<12}",
-            f"{'Max_BR_OH':<12}"
-        ])
-    else:
-        header_parts.extend([
-            f"{'Mech_EUI':<8}",
-            f"{'Overheating':<8}",
-            f"{'Pareto_Opt':<10}" if not constrained_analysis else f"{'Max_Overheating':<8}"
-        ])
+            f"{'Max_BR_OH':<12}"]
+    )
+    
+    # Add objective columns based on problem type and analysis settings
+    if problem_type == 'shading':
+        header_parts.extend([f"{'Total_Shading_Area':<18}"])
+    
+    if not constrained_analysis:
+        header_parts.extend([f"{'Pareto_Opt':<10}"])
     
     header = " ".join(header_parts)
     print(header)
@@ -197,18 +198,18 @@ def print_optimization_table(
                 else:
                     line_parts.append(f"{'':<8}")
         
-        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
-            line_parts.extend([
+        line_parts.extend([
                 f"{result['thermal_energy_demand_intensity']:<8.3f}",
                 f"{result.get('max_living_room_overheating', 0.0):<12.1f}",
                 f"{result.get('max_bedroom_overheating', 0.0):<12.1f}"
-            ])
-        else:
-            line_parts.extend([
-                f"{result['thermal_energy_demand_intensity']:<8.3f}",
-                f"{result['average_overheating_hours']:<8.1f}",
-                f"{pareto_mark:<10} " if not constrained_analysis else f"{result['max_overheating_hours']:<8.1f}"
-            ])
+        ])
+        
+        # Add objective values based on problem type and analysis settings
+        if problem_type == 'shading':
+            line_parts.extend(f"{result.get('total_shading_area', 0.0):<18.2f}")
+
+        if not constrained_analysis:
+            line_parts.extend(f"{pareto_mark:<10} ")
         
         line = " ".join(line_parts)
         print(line)
@@ -369,18 +370,22 @@ def _csv_fieldnames(
     multiobjective=True
 ):
     base = ['Generation', 'Iteration']
-    objectives = _objective_headers(problem_type, constrained_analysis, overheating_criterion)
+    
     if problem_type == 'shading':
-        # For shading problems, always include all three columns (TEDI + both overheating)
-        # The objective_names parameter only controls which objectives are optimized, not which columns are displayed
+        # For shading problems, include optimization variables first, then objectives
+        vars_part = variable_names or []
         objs = [
             'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
-            'Max_Bedroom_Overheating'
+            'Max_Bedroom_Overheating',
+            'Total_Shading_Area'
         ]
         tail = ['Pareto_Optimal'] if multiobjective else []
-        return base + ['Shading_Schedule'] + objs + tail
+        return base + vars_part + objs + tail
+    
+    # Envelope optimization
     vars_part = variable_names or []
+    objectives = _objective_headers(problem_type, constrained_analysis, overheating_criterion)
     tail = [] if constrained_analysis else ['Pareto_Optimal']
     return base + vars_part + objectives + tail
 
@@ -402,27 +407,19 @@ def _format_row(
     }
 
     if problem_type == 'shading':
-        schedule_str = ''.join('1' if v == 1 else '0' for v in result.get('shading_schedule', []))
-        row['Shading_Schedule'] = schedule_str
-        # For shading problems, always write all three columns regardless of objective_names
-        # objective_names only controls which objectives are optimized, not which columns are displayed
-        names = [
-            'Thermal_Energy_Demand_Intensity',
-            'Max_Living_Room_Overheating',
-            'Max_Bedroom_Overheating'
-        ]
-        for name in names:
-            val = result.get(name.lower(), None)
-            if val is None:
-                # try canonical keys used in code
-                val = result.get('thermal_energy_demand_intensity' if 'Mechanical' in name else (
-                    'max_living_room_overheating' if 'Living' in name else 'max_bedroom_overheating'
-                ), 0.0)
-            # format
-            if 'Mechanical' in name:
-                row[name] = '%.6f' % float(val)
-            else:
-                row[name] = '%.3f' % float(val)
+        # For shading problems, include optimization variables first
+        if variable_names:
+            for var_name in variable_names:
+                if var_name in result:
+                    row[var_name] = result[var_name]
+                else:
+                    row[var_name] = 'N/A'
+        
+        # Then add objectives
+        row['Thermal_Energy_Demand_Intensity'] = '%.4f' % result.get('thermal_energy_demand_intensity', 0.0)
+        row['Max_Living_Room_Overheating'] = '%.2f' % result.get('max_living_room_overheating', 0.0)
+        row['Max_Bedroom_Overheating'] = '%.2f' % result.get('max_bedroom_overheating', 0.0)
+        row['Total_Shading_Area'] = '%.2f' % result.get('total_shading_area', 0.0)
         if multiobjective:
             row['Pareto_Optimal'] = '' if mode == 'run' else (
                 'Yes' if result.get('pareto_optimal', False) else 'No')
@@ -463,8 +460,14 @@ def save_to_csv(
     multiobjective=True
 ):
     """General CSV save function that works for both envelope and shading problems."""
-    if generation not in solutions_by_generation:
-        return
+    # If generation is None, save all generations found so far
+    if generation is None:
+        generations_to_save = list(solutions_by_generation.keys())
+    else:
+        # If specific generation requested, check if it exists
+        if generation not in solutions_by_generation:
+            return
+        generations_to_save = [generation]
 
     fieldnames = _csv_fieldnames(
         problem_type,
@@ -474,21 +477,25 @@ def save_to_csv(
         objective_names=objective_names,
         multiobjective=multiobjective
     )
+    
+    # Always append to the file (headers are already written by initialize_csv)
     with open(csv_filename, 'a', newline='', encoding='utf-8') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        for combination_key in solutions_by_generation[generation]:
-            result = solutions_by_key[combination_key]
-            row = _format_row(
-                problem_type,
-                result,
-                variable_names,
-                constrained_analysis,
-                overheating_criterion,
-                mode='run',
-                objective_names=objective_names,
-                multiobjective=multiobjective
-            )
-            writer.writerow(row)
+        # Write solutions for the specified generations
+        for gen in generations_to_save:
+            for combination_key in solutions_by_generation[gen]:
+                result = solutions_by_key[combination_key]
+                row = _format_row(
+                    problem_type,
+                    result,
+                    variable_names,
+                    constrained_analysis,
+                    overheating_criterion,
+                    mode='run',
+                    objective_names=objective_names,
+                    multiobjective=multiobjective
+                )
+                writer.writerow(row)
 
 
 def save_final_results(
@@ -656,8 +663,16 @@ def initialize_envelope_optimization_plot(constrained_analysis=False, overheatin
     return fig, ax, scatter_all, scatter_pareto
 
 
-def update_envelope_optimization_plot(solutions_by_key, generation, fig, ax, scatter_all, scatter_pareto, 
-                                    constrained_analysis=False, overheating_criterion='ASHRAE'):
+def update_envelope_optimization_plot(
+    solutions_by_key, 
+    generation, 
+    fig, 
+    ax, 
+    scatter_all, 
+    scatter_pareto, 
+    constrained_analysis=False, 
+    overheating_criterion='ASHRAE'
+):
     """
     Update the envelope optimization plot with new solutions.
     
@@ -956,40 +971,62 @@ def print_final_results(res, shared_cache):
     print(f"  Total cached combinations: {len(shared_cache)}")
 
 
-def generate_dummy_shading_results(shading_schedule):
-    """Generate dummy simulation results for shading optimization testing."""
+def generate_dummy_shading_results(params, overheating_criterion='ASHRAE'):
+    """
+    Generate dummy simulation results for shading optimization testing.
+    
+    Args:
+        params (dict): Dictionary containing shading parameters
+        overheating_criterion (str): Either 'ASHRAE' or 'CIBSE59'
+        
+    Returns:
+        dict: Dictionary containing dummy simulation results
+    """
+    import random
+    import time
     
     # Simulate some computation time
     time.sleep(0.01)  # Small delay to simulate computation
     
-    # Generate dummy results based on shading schedule
-    # Convert shading schedule to a numeric value for calculation
-    shading_sum = sum(shading_schedule)
-    shading_ratio = shading_sum / len(shading_schedule)
+    # Generate dummy results based on parameters
+    # Convert all parameter values to numbers for calculation
+    param_values = []
+    for value in params.values():
+        if isinstance(value, (int, float)):
+            param_values.append(value)
+        elif isinstance(value, str):
+            # For string values, use their length as a numeric value
+            param_values.append(len(value))
+        else:
+            param_values.append(0)
     
-    # Generate realistic dummy results
-    # More shading (higher ratio) should generally reduce overheating but may increase energy use
-    base_tedi = 80.0  # Base mechanical energy use intensity
-    base_overheating = 25.0  # Base overheating hours
+    # Calculate total shading area (sum of all shading lengths)
+    total_shading_area = sum(param_values) * 2.0  # Rough estimate: length * 2m width
     
-    # Adjust based on shading schedule
-    tedi_variation = random.uniform(-10, 15)  # Random variation
-    overheating_variation = random.uniform(-8, 5)  # Random variation
-    
-    # Shading effect: more shading reduces overheating but may slightly increase energy use
-    tedi = base_tedi + tedi_variation + (shading_ratio * 20)  # More shading = slightly higher energy use
-    average_overheating = max(0, base_overheating + overheating_variation - (shading_ratio * 15))  # More shading = less overheating
-    
-    # CIBSE59 specific values
-    max_living_room_overheating = max(0, random.uniform(10, 35) - (shading_ratio * 10))
-    max_bedroom_overheating = max(0, random.uniform(5, 25) - (shading_ratio * 8))
+    # Generate dummy results based on overheating criterion
+    if overheating_criterion.upper() == 'CIBSE59':
+        # CIBSE59 dummy results
+        district_heating = random.uniform(500, 2000) + sum(param_values) * 50
+        average_overheating = random.uniform(0, 50) + sum(param_values) * 1
+        max_living_room_overheating = random.uniform(20, 40) + sum(param_values) * 0.5
+        max_bedroom_overheating = random.uniform(15, 35) + sum(param_values) * 0.5
+        max_overheating_hours = max(max_living_room_overheating, max_bedroom_overheating)
+    else:
+        # ASHRAE dummy results
+        district_heating = random.uniform(500, 2000) + sum(param_values) * 50
+        average_overheating = random.uniform(0, 100) + sum(param_values) * 2
+        max_overheating_hours = random.uniform(0, 80) + sum(param_values) * 1
+        max_living_room_overheating = random.uniform(0, 80) + sum(param_values) * 1
+        max_bedroom_overheating = random.uniform(0, 80) + sum(param_values) * 1
     
     return {
         'success': True,
-        'district_heating_kwh': tedi * 2590.29,  # Convert back to kWh
+        'district_heating_kwh': district_heating,
         'average_overheating_hours': average_overheating,
+        'max_overheating_hours': max_overheating_hours,
         'max_living_room_overheating': max_living_room_overheating,
-        'max_bedroom_overheating': max_bedroom_overheating
+        'max_bedroom_overheating': max_bedroom_overheating,
+        'total_shading_area': total_shading_area
     }
 
 
@@ -1250,6 +1287,158 @@ def initialize_shading_heatmap(active_elements, figsize=(7.5, 3.5)):
         axes = [ax_obj]
     
     return fig, axes, facades_present
+
+
+def initialize_shading_optimization_plot(constrained_analysis=False, overheating_criterion='ASHRAE'):
+    """Initialize plotting for shading optimization with three scatter plots.
+    
+    Args:
+        constrained_analysis: Whether constrained analysis is enabled
+        overheating_criterion: Either 'ASHRAE' or 'CIBSE59'
+        
+    Returns:
+        tuple: (figure, axes_list, scatter_objects, pareto_scatter_objects)
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig.suptitle('Shading Optimization Results', fontsize=16)
+    
+    # Plot 1: TEDI vs Max Bedroom Overheating
+    axes[0].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[0].set_ylabel('Max Bedroom Overheating (hours)')
+    axes[0].set_title('TEDI vs Max Bedroom Overheating')
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        axes[0].axhline(y=32, color='r', linestyle='--', label='Constraint (32h)')
+        axes[0].legend()
+    
+    # Plot 2: TEDI vs Max Living Room Overheating
+    axes[1].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[1].set_ylabel('Max Living Room Overheating (hours)')
+    axes[1].set_title('TEDI vs Max Living Room Overheating')
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        axes[1].axhline(y=110, color='r', linestyle='--', label='Constraint (110h)')
+        axes[1].legend()
+    
+    # Plot 3: TEDI vs Total Shading Area
+    axes[2].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[2].set_ylabel('Total Shading Area (m²)')
+    axes[2].set_title('TEDI vs Total Shading Area')
+    if constrained_analysis:
+        axes[2].axhline(y=0, color='r', linestyle='--', label='Constraint (0m²)')
+        axes[2].legend()
+    
+    # Initialize scatter plots
+    scatter_all = []
+    scatter_pareto = []
+    
+    for ax in axes:
+        scatter_all.append(ax.scatter([], [], c='blue', alpha=0.6, s=30, label='All Solutions'))
+        scatter_pareto.append(ax.scatter([], [], c='red', s=50, label='Pareto Optimal'))
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    return fig, axes, scatter_all, scatter_pareto
+
+
+def update_shading_optimization_plot(
+    solutions_by_key, 
+    generation, 
+    fig, 
+    axes, 
+    constrained_analysis=False, 
+    overheating_criterion='ASHRAE',
+    scatter_all = False,
+    scatter_pareto = False
+):
+    """Update shading optimization plots with new data.
+    
+    Args:
+        solutions_by_key: Dictionary of solutions
+        generation: Current generation number
+        fig: Figure object
+        axes: List of axes
+        scatter_all: List of scatter objects for all solutions
+        scatter_pareto: List of scatter objects for Pareto solutions
+        constrained_analysis: Whether constrained analysis is enabled
+        overheating_criterion: Either 'ASHRAE' or 'CIBSE59'
+    """
+    if not solutions_by_key:
+        return
+    
+    # Extract data for plotting
+    tedis = []
+    max_bedroom_overheating = []
+    max_living_room_overheating = []
+    total_shading_areas = []
+    
+    for solution in solutions_by_key.values():
+        # Extract TEDI from the solution dictionary
+        tedi = solution.get('thermal_energy_demand_intensity', 0)
+        tedis.append(tedi)
+        
+        # Extract overheating values from solution dictionary
+        if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+            max_bedroom_overheating.append(solution.get('max_bedroom_overheating', 0) or 0)
+            max_living_room_overheating.append(solution.get('max_living_room_overheating', 0) or 0)
+        else:
+            # For ASHRAE or unconstrained, use the same values as CIBSE59 since they exist
+            max_bedroom_overheating.append(solution.get('max_bedroom_overheating', 0) or 0)
+            max_living_room_overheating.append(solution.get('max_living_room_overheating', 0) or 0)
+        
+        total_shading_areas.append(solution.get('total_shading_area', 0) or 0)
+    
+    # Clear existing plots and recreate scatter plots
+    for ax in axes:
+        ax.clear()
+    
+    # Recreate the plots with new data
+    # Plot 1: TEDI vs Max Bedroom Overheating
+    axes[0].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[0].set_ylabel('Max Bedroom Overheating (hours)')
+    axes[0].set_title('TEDI vs Max Bedroom Overheating')
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        axes[0].axhline(y=32, color='r', linestyle='--', label='Constraint (32h)')
+    
+    # Plot 2: TEDI vs Max Living Room Overheating
+    axes[1].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[1].set_ylabel('Max Living Room Overheating (hours)')
+    axes[1].set_title('TEDI vs Max Living Room Overheating')
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        axes[1].axhline(y=110, color='r', linestyle='--', label='Constraint (110h)')
+    
+    # Plot 3: TEDI vs Total Shading Area
+    axes[2].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[2].set_ylabel('Total Shading Area (m²)')
+    axes[2].set_title('TEDI vs Total Shading Area')
+    if constrained_analysis:
+        axes[2].axhline(y=0, color='r', linestyle='--', label='Constraint (0m²)')
+    
+    # Plot the data
+    if tedis and max_bedroom_overheating:
+        axes[0].scatter(tedis, max_bedroom_overheating, c='blue', alpha=0.6, s=30, label='All Solutions')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+    
+    if tedis and max_living_room_overheating:
+        axes[1].scatter(tedis, max_living_room_overheating, c='blue', alpha=0.6, s=30, label='All Solutions')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+    
+    if tedis and total_shading_areas:
+        axes[2].scatter(tedis, total_shading_areas, c='blue', alpha=0.6, s=30, label='All Solutions')
+        axes[2].legend()
+        axes[2].grid(True, alpha=0.3)
+    
+    # Update title with generation info
+    fig.suptitle(f'Shading Optimization Results - Generation {generation}', fontsize=16)
+    
+    # Adjust layout
+    plt.tight_layout()
+    
+    # Force redraw
+    fig.canvas.draw()
+    fig.canvas.flush_events()
 
 
 if __name__ == '__main__':

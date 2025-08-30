@@ -14,8 +14,6 @@ from .simulation_utils import extract_district_heating_from_htm, parse_eso_file,
 from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
 from typing import Dict, Tuple, List, Optional
-from constants.shading_templates import get_shading_templates
-
 
 def _collect_vertices(surface, count: int = 4) -> Tuple[List[float], List[float], List[float]]:
     """Return lists of x, y, z from up to 4 vertices on a surface.
@@ -276,8 +274,9 @@ def create_shading_elements_by_orientation(idf, dimensions):
     
     Generates shading elements for different building orientations (south, east, west)
     based on the provided dimensions. The function creates overhangs and fins
-    positioned relative to fenestrations, using templates from the shading templates
-    module. Elements are only created if their corresponding dimensions are provided.
+    positioned relative to fenestrations, using SHADING:BUILDING:DETAILED objects
+    with proper counter-clockwise vertex ordering. Elements are only created if
+    their corresponding dimensions are provided.
     
     Args:
         idf: The IDF object to add shading elements to
@@ -291,11 +290,11 @@ def create_shading_elements_by_orientation(idf, dimensions):
                 },
                 'east': {
                     'overhang': {'length': float},
-                    'fin': {'length': float}         # Optional
+                    'left_fin': {'length': float}         # Optional
                 },
                 'west': {
                     'overhang': {'length': float},
-                    'fin': {'length': float}         # Optional
+                    'right_fin': {'length': float}         # Optional
                 }
             }
             
@@ -307,10 +306,9 @@ def create_shading_elements_by_orientation(idf, dimensions):
           will receive shading elements
         - Shading elements are created as SHADING:BUILDING:DETAILED objects
         - The function handles missing dimensions gracefully by skipping those elements
+        - Vertices are ordered counter-clockwise when viewed from outside the building
     """
-    fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])    
-    overhangs = []
-    fins = []
+    fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
     
     # Handle None dimensions gracefully
     if dimensions is None:
@@ -319,59 +317,190 @@ def create_shading_elements_by_orientation(idf, dimensions):
     for fenestration in fenestrations:
         wall_name = fenestration.Building_Surface_Name.lower()
         
+        # Get fenestration geometry
+        fen_vertices = _get_fenestration_vertices(fenestration)
+        if not fen_vertices:
+            continue
+            
+        # Create overhangs
         if 'south' in wall_name and 'south' in dimensions:
             if 'overhang' in dimensions['south']:
-                overhangs.append({
-                    'Name': f'South Overhang {len(overhangs) + 1}',
-                    'Window_or_Door_Name': fenestration.Name,
-                    'Depth': dimensions['south']['overhang']['length']
-                })
-            if 'right_fin' in dimensions['south'] and 'left_fin' in dimensions['south']:
-                fins.append({
-                    'Name': f'South Fin {len(fins) + 1}',
-                    'Window_or_Door_Name': fenestration.Name,
-                    'Left_Depth': dimensions['south']['right_fin']['length'],
-                    'Right_Depth': dimensions['south']['left_fin']['length']
-                })
+                _create_overhang(idf, fenestration, fen_vertices, 
+                               dimensions['south']['overhang']['length'], 'south')
+            if 'right_fin' in dimensions['south']:
+                _create_fin(idf, fenestration, fen_vertices, 0,
+                           dimensions['south']['right_fin']['length'], 'south')
+            if 'left_fin' in dimensions['south']:
+                _create_fin(idf, fenestration, fen_vertices,
+                           dimensions['south']['left_fin']['length'], 0, 'south')
         if 'west' in wall_name and 'west' in dimensions:
             if 'overhang' in dimensions['west']:
-                overhangs.append({
-                    'Name': f'West Overhang {len(overhangs) + 1}',
-                    'Window_or_Door_Name': fenestration.Name,
-                    'Depth': dimensions['west']['overhang']['length']
-                })
+                _create_overhang(idf, fenestration, fen_vertices,
+                               dimensions['west']['overhang']['length'], 'west')
             if 'right_fin' in dimensions['west']:
-                fins.append({
-                    'Name': f'West Fin {len(fins) + 1}',
-                    'Window_or_Door_Name': fenestration.Name,
-                    'Right_Depth': dimensions['west']['right_fin']['length']
-                })
+                _create_fin(idf, fenestration, fen_vertices,
+                           0.0, dimensions['west']['right_fin']['length'], 'west')
+                               
         if 'east' in wall_name and 'east' in dimensions:
             if 'overhang' in dimensions['east']:
-                overhangs.append({
-                    'Name': f'East Overhang {len(overhangs) + 1}',
-                    'Window_or_Door_Name': fenestration.Name,
-                    'Depth': dimensions['east']['overhang']['length']
-                })
+                _create_overhang(idf, fenestration, fen_vertices,
+                               dimensions['east']['overhang']['length'], 'east')
             if 'left_fin' in dimensions['east']:
-                fins.append({
-                    'Name': f'East Fin {len(fins) + 1}',
-                    'Window_or_Door_Name': fenestration.Name,
-                    'Left_Depth': dimensions['east']['left_fin']['length']
-                })
-    
-    for overhang in overhangs:
-        new_shading_element = idf.newidfobject('SHADING:OVERHANG')
-        for key, value in overhang.items():
-            setattr(new_shading_element, key, value)
-            
-    for fin in fins:
-        new_shading_element = idf.newidfobject('SHADING:FIN')
-        for key, value in fin.items():
-            setattr(new_shading_element, key, value)
+                _create_fin(idf, fenestration, fen_vertices,
+                           0.0, dimensions['east']['left_fin']['length'], 'east')
     
     return idf
-                
+
+
+def _get_fenestration_vertices(fenestration):
+    """Extract fenestration vertices as a list of (x, y, z) tuples."""
+    vertices = []
+    for i in range(1, 5):  # EnergyPlus uses 1-based indexing
+        try:
+            x = getattr(fenestration, f'Vertex_{i}_Xcoordinate')
+            y = getattr(fenestration, f'Vertex_{i}_Ycoordinate')
+            z = getattr(fenestration, f'Vertex_{i}_Zcoordinate')
+            if x is not None and y is not None and z is not None:
+                vertices.append((float(x), float(y), float(z)))
+        except (AttributeError, ValueError):
+            continue
+    
+    return vertices if len(vertices) >= 3 else None
+
+
+def _create_overhang(idf, fenestration, fen_vertices, depth, orientation):
+    """Create an overhang shading element with proper counter-clockwise vertex ordering."""
+    if not fen_vertices or len(fen_vertices) < 3:
+        return
+    
+    # Calculate overhang geometry
+    # Overhang extends outward from the building (negative Z direction for most orientations)
+    # and covers the fenestration area
+    
+    # Find bounding box of fenestration
+    xs = [v[0] for v in fen_vertices]
+    ys = [v[1] for v in fen_vertices]
+    zs = [v[2] for v in fen_vertices]
+    
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
+    
+    # Create overhang vertices (counter-clockwise when viewed from outside)
+    # Extend outward from the building surface
+    if orientation == 'south':
+        # South overhang extends north (negative Y)
+        vertices = [
+            (min_x, max_y - depth, max_z),      # Vertex 1: bottom-left
+            (max_x, max_y - depth, max_z),      # Vertex 2: bottom-right
+            (max_x, max_y, max_z),              # Vertex 3: top-right
+            (min_x, max_y, max_z),              # Vertex 4: top-left
+        ]
+    elif orientation == 'west':
+        # West overhang extends west (negative X)
+        vertices = [
+            (min_x, min_y, max_z),           # Vertex 1: bottom-left
+            (min_x, max_y, max_z),           # Vertex 2: bottom-right
+            (min_x - depth, max_y, max_z),   # Vertex 3: top-right
+            (min_x - depth, min_y, max_z),   # Vertex 4: top-left
+        ]
+    elif orientation == 'east':
+        # East overhang extends east (positive X)
+        vertices = [
+            (max_x, min_y, max_z),           # Vertex 1: bottom-left
+            (max_x, max_y, max_z),           # Vertex 2: bottom-right
+            (max_x + depth, max_y, max_z),   # Vertex 3: top-right
+            (max_x + depth, min_y, max_z),   # Vertex 4: top-left
+        ]
+    else:
+        return
+    
+    # Create the shading object
+    shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
+    shading.Name = f'{orientation.capitalize()} Overhang {fenestration.Name}'
+    shading.Transmittance_Schedule_Name = 'South Overhang Shading Schedule'
+    shading.Number_of_Vertices = 4
+    
+    # Set vertices with proper counter-clockwise ordering
+    for i, (x, y, z) in enumerate(vertices, 1):
+        setattr(shading, f'Vertex_{i}_Xcoordinate', x)
+        setattr(shading, f'Vertex_{i}_Ycoordinate', y)
+        setattr(shading, f'Vertex_{i}_Zcoordinate', z)
+
+
+def _create_fin(
+    idf, 
+    fenestration, 
+    fen_vertices, 
+    left_depth, 
+    right_depth, 
+    orientation
+):
+    """Create a fin shading element with proper counter-clockwise vertex ordering."""
+    if not fen_vertices or len(fen_vertices) < 3:
+        return
+    # Calculate fin geometry
+    # Fins extend outward from the building surface perpendicular to the wall
+    
+    # Find bounding box of fenestration
+    xs = [v[0] for v in fen_vertices]
+    ys = [v[1] for v in fen_vertices]
+    zs = [v[2] for v in fen_vertices]
+    
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    min_z, max_z = min(zs), max(zs)
+    
+    # print(min_x, max_x)
+    
+    # Create fin vertices (counter-clockwise when viewed from outside)
+    if orientation == 'south' and left_depth > 0:
+        # South fin extends sourth from left of fenestration (negative Y direction) as seen from east side of building
+        vertices = [
+            (min_x, min_y - left_depth, min_z),      # Vertex 1: bottom-left
+            (min_x, min_y, min_z),     # Vertex 2: bottom-right
+            (min_x, min_y, max_z),     # Vertex 3: top-right
+            (min_x, min_y - left_depth, max_z),      # Vertex 4: top-left
+        ]
+    elif orientation == 'south' and right_depth > 0:
+        # South fin extends south from right of fenestration (negative Y direction) as seen from east side of building
+        vertices = [
+            (max_x, min_y - right_depth, min_z),      # Vertex 1: bottom-left
+            (max_x, min_y, min_z),     # Vertex 2: bottom-right
+            (max_x, min_y, max_z),     # Vertex 3: top-right
+            (max_x, min_y  - right_depth, max_z),      # Vertex 4: top-left
+        ]
+    elif orientation == 'west':
+        # West fin extends west (negative X direction) as seen from north side of building
+        vertices = [
+            (min_x, min_y , min_z),      # Vertex 1: bottom-left
+            (min_x - right_depth, min_y, min_z),     # Vertex 2: bottom-right
+            (min_x - right_depth, min_y, max_z),     # Vertex 3: top-right
+            (min_x, min_y, max_z),      # Vertex 4: top-left
+        ]
+    elif orientation == 'east':
+        # East fin extends east (positive X direction)
+        vertices = [
+            (max_x, min_y - left_depth, min_z),      # Vertex 1: bottom-left
+            (max_x, max_y + right_depth, min_z),     # Vertex 2: bottom-right
+            (max_x, max_y + right_depth, max_z),     # Vertex 3: top-right
+            (max_x, min_y - left_depth, max_z),      # Vertex 4: top-left
+        ]
+    else:
+        return
+    
+    # Create the shading object
+    shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
+    shading.Name = f'{orientation.capitalize()} Fin {fenestration.Name} {'Left' if left_depth > 0 else 'Right'}'
+    shading.Transmittance_Schedule_Name = 'South Overhang Shading Schedule'
+    shading.Number_of_Vertices = 4
+    
+    # Set vertices with proper counter-clockwise ordering
+    for i, (x, y, z) in enumerate(vertices, 1):
+        setattr(shading, f'Vertex_{i}_Xcoordinate', x)
+        setattr(shading, f'Vertex_{i}_Ycoordinate', y)
+        setattr(shading, f'Vertex_{i}_Zcoordinate', z)
+
 
 def assign_shading_transmittance_schedules(idf, tol: float = 1e-3) -> int:
     """Assign transmittance schedules by orientation and element type.
@@ -775,13 +904,14 @@ def apply_solar_absorptance_to_surfaces(idf, materials_albedo: dict[str, float])
         if material.Name in materials_albedo:
             material.Solar_Absorptance = materials_albedo[material.Name]
 
-def modify_idf(idf, envelope_parameters, save=False, save_path=None):
+def modify_idf(idf, parameters, save=False, save_path=None):
     """
-    Apply envelope parameters to an IDF object and optionally save the modified file.
+    Apply parameters to an IDF object and optionally save the modified file.
     
     Args:
         idf: IDF object to modify
-        envelope_parameters (dict): Dictionary containing envelope parameters:
+        parameters (dict): Dictionary containing either envelope or shading parameters:
+            Envelope parameters:
             - 'external_wall': External wall construction name
             - 'roof': Roof construction name
             - 'window': Window construction name
@@ -791,6 +921,13 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
             - 'wwr_north': Window-to-wall ratio for north facade
             - 'wwr_south': Window-to-wall ratio for south facade
             - 'shading_schedule': 144-long list (6 elements × 4 seasons × 6 periods)
+            
+            Shading parameters:
+            - 'south_overhang': Overhang length for south facade
+            - 'south_right_fin': Right fin length for south facade
+            - 'south_left_fin': Left fin length for south facade
+            - 'west_overhang': Overhang length for west facade
+            - 'west_fin': Fin length for west facade
         save (bool): Whether to save the modified IDF file
         save_path (str, optional): Path to save the modified IDF file. If None, uses original path
     
@@ -798,47 +935,81 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
         IDF: The modified IDF object
     """
     # Handle None parameters gracefully
-    if envelope_parameters is None:
-        envelope_parameters = {}
+    if parameters is None:
+        parameters = {}
     
-    # Apply envelope parameters
-    if 'external_wall' in envelope_parameters:
-        apply_construction_to_surfaces(idf, envelope_parameters['external_wall'], 'Wall')
+    # Check if these are envelope parameters or shading parameters
+    is_envelope = any(key in parameters for key in ['external_wall', 'roof', 'window', 'infiltration_ach', 'wwr_east', 'wwr_west', 'wwr_north', 'wwr_south', 'wall_solar_absorptance', 'roof_solar_absorptance', 'shading_schedule'])
+    is_shading = any(key in parameters for key in ['south_overhang', 'south_right_fin', 'south_left_fin', 'west_overhang', 'west_fin'])
     
-    if 'roof' in envelope_parameters:
-        apply_construction_to_surfaces(idf, envelope_parameters['roof'], 'Roof')
-    
-    if 'window' in envelope_parameters:
-        apply_construction_to_surfaces(idf, envelope_parameters['window'], 'Window')
-    
-    # Apply infiltration
-    if 'infiltration_ach' in envelope_parameters:
-        apply_infiltration_to_zones(idf, envelope_parameters['infiltration_ach'])
-    
-    # Apply WWR
-    if all(key in envelope_parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
-        apply_wwr_to_windows(idf, 
-                           envelope_parameters['wwr_east'],
-                           envelope_parameters['wwr_west'],
-                           envelope_parameters['wwr_north'],
-                           envelope_parameters['wwr_south'])
-    
-    # Apply albedo
-    if 'wall_solar_absorptance' in envelope_parameters or 'roof_solar_absorptance' in envelope_parameters:
-        albedo_dict = {}
-        if 'wall_solar_absorptance' in envelope_parameters:
-            albedo_dict["Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134"] = envelope_parameters['wall_solar_absorptance']
-            albedo_dict["Cement/plaster/mortar - cement panels wood fibres_.0134"] = envelope_parameters['wall_solar_absorptance']
-        if 'roof_solar_absorptance' in envelope_parameters:
-            albedo_dict["Bitumen felt/sheet_.19"] = envelope_parameters['roof_solar_absorptance']
-            albedo_dict["Bitumen felt/sheet_.003"] = envelope_parameters['roof_solar_absorptance']
+    if is_envelope:
+        # Apply envelope parameters
+        if 'external_wall' in parameters:
+            apply_construction_to_surfaces(idf, parameters['external_wall'], 'Wall')
         
-        if albedo_dict:  # Only call if we have values to apply
-            apply_solar_absorptance_to_surfaces(idf, albedo_dict)
+        if 'roof' in parameters:
+            apply_construction_to_surfaces(idf, parameters['roof'], 'Roof')
+        
+        if 'window' in parameters:
+            apply_construction_to_surfaces(idf, parameters['window'], 'Window')
+        
+        # Apply infiltration
+        if 'infiltration_ach' in parameters:
+            apply_infiltration_to_zones(idf, parameters['infiltration_ach'])
+        
+        # Apply WWR
+        if all(key in parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
+            apply_wwr_to_windows(idf, 
+                               parameters['wwr_east'],
+                               parameters['wwr_west'],
+                               parameters['wwr_north'],
+                               parameters['wwr_south'])
+        
+        # Apply albedo
+        if 'wall_solar_absorptance' in parameters or 'roof_solar_absorptance' in parameters:
+            albedo_dict = {}
+            if 'wall_solar_absorptance' in parameters:
+                albedo_dict["Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134"] = parameters['wall_solar_absorptance']
+                albedo_dict["Cement/plaster/mortar - cement panels wood fibres_.0134"] = parameters['wall_solar_absorptance']
+            if 'roof_solar_absorptance' in parameters:
+                albedo_dict["Bitumen felt/sheet_.19"] = parameters['roof_solar_absorptance']
+                albedo_dict["Bitumen felt/sheet_.003"] = parameters['roof_solar_absorptance']
+            
+            if albedo_dict:  # Only call if we have values to apply
+                apply_solar_absorptance_to_surfaces(idf, albedo_dict)
+        
+        # Apply shading schedules
+        if 'shading_schedule' in parameters:
+            idf = apply_shading_schedules_to_idf(idf, parameters['shading_schedule'])
     
-    # Apply shading schedules
-    if 'shading_schedule' in envelope_parameters:
-        idf = apply_shading_schedules_to_idf(idf, envelope_parameters['shading_schedule'])
+    if is_shading:
+        # Apply shading geometry parameters
+        shading_dimensions = {}
+        for key, value in parameters.items():
+            if key.startswith('south_') or key.startswith('west_'):
+                if key == 'south_overhang':
+                    if 'south' not in shading_dimensions:
+                        shading_dimensions['south'] = {}
+                    shading_dimensions['south']['overhang'] = {'length': value}
+                elif key == 'south_left_fin':
+                    if 'south' not in shading_dimensions:
+                        shading_dimensions['south'] = {}
+                    shading_dimensions['south']['left_fin'] = {'length': value}
+                elif key == 'south_right_fin':
+                    if 'south' not in shading_dimensions:
+                        shading_dimensions['south'] = {}
+                    shading_dimensions['south']['right_fin'] = {'length': value}
+                elif key == 'west_overhang':
+                    if 'west' not in shading_dimensions:
+                        shading_dimensions['west'] = {}
+                    shading_dimensions['west']['overhang'] = {'length': value}
+                elif key == 'west_fin':
+                    if 'west' not in shading_dimensions:
+                        shading_dimensions['west'] = {}
+                    shading_dimensions['west']['fin'] = {'length': value}
+        
+        # Create shading elements using the existing function
+        idf = create_shading_elements_by_orientation(idf, shading_dimensions)
     
     # Save the modified IDF file if requested
     if save:
@@ -851,7 +1022,7 @@ def modify_idf(idf, envelope_parameters, save=False, save_path=None):
 def run_simulation(
     idf_path, 
     weather_path, 
-    envelope_parameters, 
+    params,
     idd_path=None, 
     output_dir=None, 
     verbose='v'
@@ -905,8 +1076,12 @@ def run_simulation(
         # Initialize IDF with both IDF file and weather file
         idf = IDF(idf_path, weather_path)
         
-        # Apply envelope parameters using the new modify_idf function
-        idf = modify_idf(idf, envelope_parameters)
+        
+        idf = modify_idf(idf, params)
+        
+        # Save the modified IDF file for later analysis
+        modified_idf_path = os.path.join(full_output_dir, "modified_input.idf")
+        idf.save(modified_idf_path)
         
         # Run simulation with specified output directory and verbosity
         idf.run(output_directory=full_output_dir, verbose=verbose)
@@ -991,13 +1166,26 @@ def analyze_simulation_results(output_dir, cleanup=True, overheating_criterion='
             max_bedroom_overheating = None
             overheating_results = None
         
+        # Calculate total shading area from the modified IDF file
+        total_shading_area = 0.0
+        modified_idf_path = os.path.join(output_dir, "modified_input.idf")
+        if os.path.exists(modified_idf_path):
+            try:
+                # Load the modified IDF that was used for simulation
+                idf = IDF(modified_idf_path)
+                total_shading_area = calculate_total_shading_area(idf)
+            except Exception as e:
+                print(f"Warning: Could not calculate shading area: {e}")
+                total_shading_area = 0.0
+        
         results = {
             'success': True,
             'output_directory': output_dir,
             'district_heating_kwh': district_heating,
             'average_overheating_hours': average_overheating,
             'overheating_results': overheating_results,
-            'overheating_criterion': overheating_criterion
+            'overheating_criterion': overheating_criterion,
+            'total_shading_area': total_shading_area
         }
         
         # Add criterion-specific results
@@ -1245,3 +1433,173 @@ def build_seasonal_shading_schedules(optimization_variables, element_configs):
         shading_dict[element_name] = seasonal_dict
     
     return shading_dict
+
+
+def calculate_total_shading_area(idf) -> float:
+    """Calculate the total surface area of all shading elements in the building.
+    
+    Args:
+        idf: The IDF object containing shading elements
+        
+    Returns:
+        Total shading area in square meters
+    """
+    total_area = 0.0
+    
+    # Calculate area for SHADING:BUILDING:DETAILED objects (overhangs and fins)
+    for shading in idf.idfobjects.get('SHADING:BUILDING:DETAILED', []):
+        try:
+            # Get vertex coordinates
+            vertices = []
+            for i in range(1, 5):  # Assuming 4 vertices
+                x = getattr(shading, f'Vertex_{i}_Xcoordinate', None)
+                y = getattr(shading, f'Vertex_{i}_Ycoordinate', None)
+                z = getattr(shading, f'Vertex_{i}_Zcoordinate', None)
+                
+                if x is not None and y is not None and z is not None:
+                    try:
+                        vertices.append((float(x), float(y), float(z)))
+                    except (ValueError, TypeError):
+                        continue
+            
+            if len(vertices) >= 3:
+                # Calculate area using the shoelace formula for polygon area
+                area = _calculate_polygon_area(vertices)
+                total_area += area
+                
+        except (AttributeError, ValueError, TypeError) as e:
+            # Skip invalid shading elements
+            continue
+    
+    # Get all fenestrations for reference
+    fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
+    fenestration_dict = {fen.Name: fen for fen in fenestrations}
+    
+    # Calculate area for SHADING:OVERHANG objects
+    for overhang in idf.idfobjects.get('SHADING:OVERHANG', []):
+        window_name = getattr(overhang, 'Window_or_Door_Name', None)
+        depth = getattr(overhang, 'Depth', 0.0)
+        
+        if window_name and window_name in fenestration_dict:
+            window = fenestration_dict[window_name]
+            window_width, window_height = _calculate_window_dimensions(window)
+            
+            # Overhang area = window width × depth
+            overhang_area = window_width * depth
+            total_area += overhang_area
+    
+    # Calculate area for SHADING:FIN objects
+    for fin in idf.idfobjects.get('SHADING:FIN', []):
+        window_name = getattr(fin, 'Window_or_Door_Name', None)
+        left_depth = getattr(fin, 'Left_Depth', 0.0)
+        right_depth = getattr(fin, 'Right_Depth', 0.0)
+        
+        if window_name and window_name in fenestration_dict:
+            window = fenestration_dict[window_name]
+            window_width, window_height = _calculate_window_dimensions(window)
+            
+            # Convert depth values to float, handling empty strings and invalid values
+            try:
+                left_depth_float = float(left_depth) if left_depth and str(left_depth).strip() else 0.0
+                right_depth_float = float(right_depth) if right_depth and str(right_depth).strip() else 0.0
+            except (ValueError, TypeError):
+                left_depth_float = 0.0
+                right_depth_float = 0.0
+            
+            # Fin areas = window height × depth (left and right fins)
+            left_fin_area = window_height * left_depth_float
+            right_fin_area = window_height * right_depth_float
+            total_area += left_fin_area + right_fin_area
+    
+    return total_area
+
+
+def _calculate_window_dimensions(fenestration) -> tuple[float, float]:
+    """Calculate the width and height of a fenestration surface.
+    
+    Args:
+        fenestration: FENESTRATIONSURFACE:DETAILED object
+        
+    Returns:
+        tuple: (width, height) in meters
+    """
+    vertices = []
+    for i in range(1, 5):  # Assuming 4 vertices
+        x = getattr(fenestration, f'Vertex_{i}_Xcoordinate', None)
+        y = getattr(fenestration, f'Vertex_{i}_Ycoordinate', None)
+        z = getattr(fenestration, f'Vertex_{i}_Zcoordinate', None)
+        
+        if x is not None and y is not None and z is not None:
+            try:
+                vertices.append((float(x), float(y), float(z)))
+            except (ValueError, TypeError):
+                continue
+    
+    if len(vertices) < 4:
+        return 0.0, 0.0
+    
+    # Calculate width and height from vertices
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    
+    # Width is the range in X or Y (whichever varies more)
+    x_range = max(xs) - min(xs)
+    y_range = max(ys) - min(ys)
+    z_range = max(zs) - min(zs)
+    
+    # Height is always the Z range
+    height = z_range
+    
+    # Width is the larger of X or Y range (assuming window is oriented along one axis)
+    width = max(x_range, y_range)
+    
+    return width, height
+
+
+def _calculate_polygon_area(vertices):
+    """Calculate the area of a polygon using the shoelace formula.
+    
+    Args:
+        vertices: List of (x, y, z) tuples representing polygon vertices
+        
+    Returns:
+        Area in square meters
+    """
+    if len(vertices) < 3:
+        return 0.0
+    
+    # For 3D polygons, we need to determine which plane they're in
+    # and project onto that plane to calculate the area
+    
+    # Check if the polygon is in the XY, XZ, or YZ plane
+    xs = [v[0] for v in vertices]
+    ys = [v[1] for v in vertices]
+    zs = [v[2] for v in vertices]
+    
+    x_range = max(xs) - min(xs)
+    y_range = max(ys) - min(ys)
+    z_range = max(zs) - min(zs)
+    
+    # Determine which plane the polygon is in based on which coordinate varies least
+    if x_range < 0.001:  # Polygon is in YZ plane (constant X)
+        coords = [(v[1], v[2]) for v in vertices]
+    elif y_range < 0.001:  # Polygon is in XZ plane (constant Y)
+        coords = [(v[0], v[2]) for v in vertices]
+    elif z_range < 0.001:  # Polygon is in XY plane (constant Z)
+        coords = [(v[0], v[1]) for v in vertices]
+    else:
+        # Polygon is not aligned with any coordinate plane
+        # Use XY projection as fallback
+        coords = [(v[0], v[1]) for v in vertices]
+    
+    # Use the shoelace formula to calculate area
+    n = len(coords)
+    area = 0.0
+    
+    for i in range(n):
+        j = (i + 1) % n
+        area += coords[i][0] * coords[j][1]
+        area -= coords[j][0] * coords[i][1]
+    
+    return abs(area) / 2.0

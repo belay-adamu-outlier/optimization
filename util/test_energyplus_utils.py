@@ -22,6 +22,7 @@ from .energyplus_utils import (
     apply_shading_schedules_to_idf,
     _expand_partial_schedule,
     build_seasonal_shading_schedules,
+    calculate_total_shading_area,
 )
 
 
@@ -1534,15 +1535,17 @@ class TestCreateShadingElementsByOrientation:
         
         result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
         
-        # Verify that both SHADING:OVERHANG and SHADING:FIN objects are created
+        # Verify that SHADING:BUILDING:DETAILED objects are created
         calls = self.mock_idf.newidfobject.call_args_list
         
-        # Check that we have the right mix of object types
-        overhang_calls = [call for call in calls if call[0][0] == 'SHADING:OVERHANG']
-        fin_calls = [call for call in calls if call[0][0] == 'SHADING:FIN']
+        # Check that we have the right number of SHADING:BUILDING:DETAILED objects
+        shading_calls = [call for call in calls if call[0][0] == 'SHADING:BUILDING:DETAILED']
         
-        assert len(overhang_calls) == 3  # One for each orientation
-        assert len(fin_calls) == 3       # One for each orientation
+        assert len(shading_calls) == 6  # 3 overhangs + 3 fins
+        
+        # Verify the first call creates a SHADING:BUILDING:DETAILED object
+        first_call = calls[0]
+        assert first_call[0][0] == 'SHADING:BUILDING:DETAILED'
         
         assert result == self.mock_idf
 
@@ -1762,3 +1765,103 @@ class TestModifyIdf:
             mock_apply_shading.assert_not_called()
             
             assert result == self.mock_idf 
+
+
+class TestCalculateTotalShadingArea:
+    """Test scenarios for calculate_total_shading_area function."""
+    
+    def setup_method(self):
+        """Set up mock IDF object for each test."""
+        self.mock_idf = Mock()
+        
+        # Create mock fenestrations
+        self.mock_fenestration = Mock()
+        self.mock_fenestration.Name = 'Test_Window'
+        self.mock_fenestration.Building_Surface_Name = 'South:Zone1'
+        
+        # Set up window vertices for fenestration (1m x 1.5m window)
+        for i in range(1, 5):
+            setattr(self.mock_fenestration, f'Vertex_{i}_Xcoordinate', 5.0)
+            setattr(self.mock_fenestration, f'Vertex_{i}_Ycoordinate', 0.0 + (i-1) * 0.5)
+            setattr(self.mock_fenestration, f'Vertex_{i}_Zcoordinate', 1.0 if i <= 2 else 2.5)
+        
+        # Create mock shading objects
+        self.mock_overhang = Mock()
+        self.mock_overhang.Name = 'South Overhang Test_Window'
+        # Overhang vertices: 1m x 0.5m = 0.5 m²
+        setattr(self.mock_overhang, 'Vertex_1_Xcoordinate', 5.0)
+        setattr(self.mock_overhang, 'Vertex_1_Ycoordinate', 0.0)
+        setattr(self.mock_overhang, 'Vertex_1_Zcoordinate', 2.5)
+        setattr(self.mock_overhang, 'Vertex_2_Xcoordinate', 6.0)
+        setattr(self.mock_overhang, 'Vertex_2_Ycoordinate', 0.0)
+        setattr(self.mock_overhang, 'Vertex_2_Zcoordinate', 2.5)
+        setattr(self.mock_overhang, 'Vertex_3_Xcoordinate', 6.0)
+        setattr(self.mock_overhang, 'Vertex_3_Ycoordinate', 0.5)
+        setattr(self.mock_overhang, 'Vertex_3_Zcoordinate', 2.5)
+        setattr(self.mock_overhang, 'Vertex_4_Xcoordinate', 5.0)
+        setattr(self.mock_overhang, 'Vertex_4_Ycoordinate', 0.5)
+        setattr(self.mock_overhang, 'Vertex_4_Zcoordinate', 2.5)
+        
+        self.mock_fin = Mock()
+        self.mock_fin.Name = 'South Fin Test_Window'
+        # Fin vertices: 1.6m x 1.5m = 2.4 m² (extends 0.3m on each side)
+        setattr(self.mock_fin, 'Vertex_1_Xcoordinate', 4.7)
+        setattr(self.mock_fin, 'Vertex_1_Ycoordinate', 0.0)
+        setattr(self.mock_fin, 'Vertex_1_Zcoordinate', 1.0)
+        setattr(self.mock_fin, 'Vertex_2_Xcoordinate', 6.3)
+        setattr(self.mock_fin, 'Vertex_2_Ycoordinate', 0.0)
+        setattr(self.mock_fin, 'Vertex_2_Zcoordinate', 1.0)
+        setattr(self.mock_fin, 'Vertex_3_Xcoordinate', 6.3)
+        setattr(self.mock_fin, 'Vertex_3_Ycoordinate', 0.0)
+        setattr(self.mock_fin, 'Vertex_3_Zcoordinate', 2.5)
+        setattr(self.mock_fin, 'Vertex_4_Xcoordinate', 4.7)
+        setattr(self.mock_fin, 'Vertex_4_Ycoordinate', 0.0)
+        setattr(self.mock_fin, 'Vertex_4_Zcoordinate', 2.5)
+        
+        # Set up idfobjects dictionary
+        self.mock_idf.idfobjects = {
+            'FENESTRATIONSURFACE:DETAILED': [self.mock_fenestration],
+            'SHADING:BUILDING:DETAILED': [self.mock_overhang, self.mock_fin]
+        }
+    
+    def test_calculate_total_shading_area_with_building_detailed(self):
+        """Test calculating total shading area with SHADING:BUILDING:DETAILED objects."""
+        from util.energyplus_utils import calculate_total_shading_area
+        
+        total_area = calculate_total_shading_area(self.mock_idf)
+        
+        # Expected areas:
+        # Overhang: 1m × 0.5m = 0.5 m²
+        # Fin: 1.6m × 1.5m = 2.4 m²
+        # Total expected: 2.9 m²
+        
+        expected_area = 0.5 + 2.4
+        assert abs(total_area - expected_area) < 0.01, f"Expected {expected_area}, got {total_area}"
+    
+    def test_calculate_total_shading_area_with_no_shading(self):
+        """Test calculating total shading area with no shading elements."""
+        from util.energyplus_utils import calculate_total_shading_area
+        
+        # Remove shading objects
+        self.mock_idf.idfobjects['SHADING:BUILDING:DETAILED'] = []
+        
+        total_area = calculate_total_shading_area(self.mock_idf)
+        
+        assert total_area == 0.0
+    
+    def test_calculate_total_shading_area_with_invalid_vertices(self):
+        """Test calculating total shading area with invalid vertex data."""
+        from util.energyplus_utils import calculate_total_shading_area
+        
+        # Create shading object with invalid vertices
+        invalid_shading = Mock()
+        invalid_shading.Name = 'Invalid_Shading'
+        setattr(invalid_shading, 'Vertex_1_Xcoordinate', None)
+        setattr(invalid_shading, 'Vertex_1_Ycoordinate', None)
+        setattr(invalid_shading, 'Vertex_1_Zcoordinate', None)
+        
+        self.mock_idf.idfobjects['SHADING:BUILDING:DETAILED'] = [invalid_shading]
+        
+        total_area = calculate_total_shading_area(self.mock_idf)
+        
+        assert total_area == 0.0

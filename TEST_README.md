@@ -189,6 +189,13 @@ pytest test_overheating_analysis.py simple_test.py debug_test.py -v
 - ✅ Handling None dimensions parameter
 - ✅ Conditional creation of overhangs, fins, and right/left fins
 
+#### TestCalculateTotalShadingArea
+
+- ✅ Calculating total shading area from SHADING:BUILDING:DETAILED objects
+- ✅ Handling cases with no shading elements
+- ✅ Graceful handling of invalid vertex data
+- ✅ Proper area calculation using vertex coordinates and shoelace formula
+
 #### TestModifyIdf
 
 - ✅ Modifying IDF with all envelope parameters
@@ -228,8 +235,8 @@ pytest test_overheating_analysis.py simple_test.py debug_test.py -v
 
 ## Test Statistics
 
-The test suite currently contains **76 tests** covering:
-- **Building envelope functions**: 37 tests
+The test suite currently contains **80 tests** covering:
+- **Building envelope functions**: 40 tests
 - **Shading schedule functions**: 12 tests
 - **Shading optimization helpers**: 8 tests
 - **Simulation utilities**: 14 tests

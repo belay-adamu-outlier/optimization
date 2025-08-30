@@ -329,7 +329,8 @@ def set_in_cache(
     iteration=None, 
     params=None,
     max_living_room_overheating=None,
-    max_bedroom_overheating=None
+    max_bedroom_overheating=None,
+    total_shading_area=None
 ):
 
     """Set a value in the shared cache with optional generation info and parameters."""
@@ -347,6 +348,9 @@ def set_in_cache(
             cache_entry['max_living_room_overheating'] = max_living_room_overheating
         if max_bedroom_overheating is not None:
             cache_entry['max_bedroom_overheating'] = max_bedroom_overheating
+        # Add total shading area if provided (for shading optimization)
+        if total_shading_area is not None:
+            cache_entry['total_shading_area'] = total_shading_area
             
         cache[key] = cache_entry
     else:

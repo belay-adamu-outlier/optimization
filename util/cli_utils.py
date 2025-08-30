@@ -13,9 +13,17 @@ import sys
 def get_interactive_arguments():
     """Get all arguments interactively with clear default value prompts."""
     print("=" * 60)
-    print("BUILDING ENVELOPE OPTIMIZATION - INTERACTIVE SETUP")
+    print("BUILDING OPTIMIZATION - INTERACTIVE SETUP")
     print("=" * 60)
     print("Please provide the following parameters. Press Enter to use default values.\n")
+    
+    # Check if we're in test mode (command line arguments)
+    if len(sys.argv) > 1 and '--test-mode' in sys.argv:
+        return _get_test_mode_arguments()
+    
+    # Optimization type selection
+    optimization_type = _get_optimization_type_choice()
+    print(f"Optimization type: {optimization_type}\n")
     
     # Test mode selection
     test_mode = _get_boolean_input("Enable test mode (use dummy data instead of EnergyPlus simulations)", False, "test mode")
@@ -57,12 +65,24 @@ def get_interactive_arguments():
     
     # Random seed
     seed = _get_seed_input()
-    print(f"Random seed: {seed if seed is not None else 'Auto-generated'}\n")
+    print(f"Random seed: {seed if seed is None else 'Auto-generated'}\n")
     
     # Summary and confirmation
-    _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed, test_mode)
+    _print_summary_and_confirm(
+        optimization_type, 
+        weather_file, 
+        constrained_analysis, 
+        overheating_criterion, 
+        generations, 
+        population_size, 
+        crossover_prob, 
+        mutation_prob, 
+        debug_mode, 
+        seed, test_mode
+    )
     
     return {
+        'optimization_type': optimization_type,
         'weather': weather_file,
         'constrained_analysis': constrained_analysis,
         'overheating_criterion': overheating_criterion,
@@ -74,6 +94,66 @@ def get_interactive_arguments():
         'seed': seed,
         'test_mode': test_mode
     }
+
+
+def _get_test_mode_arguments():
+    """Get arguments automatically for test mode."""
+    print("TEST MODE: Using automatic test configuration\n")
+    
+    # Parse command line arguments for test mode
+    args = sys.argv[1:]
+    
+    # Default test values
+    test_args = {
+        'optimization_type': 'shading',
+        'weather': 'Vancouver - 2021 AMY.epw',
+        'constrained_analysis': True,
+        'overheating_criterion': 'CIBSE59',
+        'generations': 2,
+        'population_size': 5,
+        'crossover_prob': 0.5,
+        'mutation_prob': 0.125,
+        'debug': False,
+        'seed': None,
+        'test_mode': True
+    }
+    
+    # Override with command line arguments if provided
+    for i, arg in enumerate(args):
+        if arg == '--optimization-type' and i + 1 < len(args):
+            test_args['optimization_type'] = args[i + 1]
+        elif arg == '--generations' and i + 1 < len(args):
+            test_args['generations'] = int(args[i + 1])
+        elif arg == '--population-size' and i + 1 < len(args):
+            test_args['population_size'] = int(args[i + 1])
+        elif arg == '--constrained-analysis':
+            test_args['constrained_analysis'] = True
+        elif arg == '--overheating-criterion' and i + 1 < len(args):
+            test_args['overheating_criterion'] = args[i + 1]
+    
+    print("Test configuration:")
+    for key, value in test_args.items():
+        print(f"  {key}: {value}")
+    print()
+    
+    return test_args
+
+
+def _get_optimization_type_choice():
+    """Get optimization type choice from user."""
+    print("Optimization type options:")
+    print("1. Envelope optimization (default)")
+    print("2. Shading optimization")
+    
+    choice = input("Enter choice (1-2) or press Enter for default value of 1: ").strip()
+    
+    if choice == "1" or choice == "":
+        return "envelope"
+    elif choice == "2":
+        return "shading"
+    else:
+        print("Invalid choice, using default: envelope")
+        return "envelope"
 
 
 def _get_weather_file_choice():
@@ -182,11 +262,24 @@ def _get_seed_input():
         return None
 
 
-def _print_summary_and_confirm(weather_file, constrained_analysis, overheating_criterion, generations, population_size, crossover_prob, mutation_prob, debug_mode, seed, test_mode):
+def _print_summary_and_confirm(
+    optimization_type, 
+    weather_file, 
+    constrained_analysis, 
+    overheating_criterion, 
+    generations, 
+    population_size, 
+    crossover_prob, 
+    mutation_prob, 
+    debug_mode, 
+    seed, 
+    test_mode
+):
     """Print parameter summary and get user confirmation."""
     print("=" * 60)
     print("OPTIMIZATION PARAMETERS SUMMARY")
     print("=" * 60)
+    print(f"Optimization Type: {optimization_type}")
     print(f"Test Mode: {'Enabled' if test_mode else 'Disabled'}")
     print(f"Weather File: {weather_file}")
     print(f"Constrained Analysis: {'Enabled' if constrained_analysis else 'Disabled'}")
