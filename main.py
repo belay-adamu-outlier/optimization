@@ -418,7 +418,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 return
             
             if self.optimization_type == 'shading':
-                    out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32, total_shading_area - 0]
+                    out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32, total_shading_area - 110]
             else:
                 if self.overheating_criterion.upper() == 'CIBSE59':
                     out["G"] = [max_living_room_overheating - 110, max_bedroom_overheating - 32]
