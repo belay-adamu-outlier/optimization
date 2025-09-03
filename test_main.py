@@ -316,8 +316,8 @@ class TestBuildingEnvelopeProblem:
             constrained_analysis=False
         )
         
-        # Mock x_to_params to raise an exception
-        with patch('main.x_to_params', side_effect=Exception("Test error")):
+        # Mock get_params to raise an exception
+        with patch('main.get_params', side_effect=Exception("Test error")):
             x = np.array([0, 1, 0])
             out = {}
             
@@ -403,8 +403,8 @@ class TestBuildingEnvelopeProblem:
         x = [0, 1, 0]  # List instead of numpy array
         out = {}
         
-        with patch('main.x_to_params') as mock_x_to_params:
-            mock_x_to_params.return_value = {"external_wall": "R3 - Wall", "roof": "R10 - Roof", "window": "Dbl LoE"}
+        with patch('main.get_params') as mock_get_params:
+            mock_get_params.return_value = {"external_wall": "R3 - Wall", "roof": "R10 - Roof", "window": "Dbl LoE"}
             
             with patch('main.run_simulation') as mock_run_sim, \
                  patch('main.analyze_simulation_results') as mock_analyze:

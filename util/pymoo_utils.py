@@ -80,90 +80,72 @@ def get_problem_constraints(optimization_type, constrained_analysis, overheating
         return base_constraints
 
 
-def x_to_params_envelope(x, optimization_variables):
-    """Convert optimization variables x to parameter dictionary for envelope optimization.
-    
+def get_params(optimization_type, x, optimization_variables):
+    """Convert optimization vector ``x`` into a parameters dict.
+
+    - For 'shading', returns flat shading keys and nested 'shading_dimensions'.
+    - For 'envelope', returns WWRs (as decimals) and construction names.
+
     Args:
-        x (array): Optimization variables array
-        optimization_variables (dict): Dictionary of optimization variables and options
-        
+        optimization_type (str): 'envelope' or 'shading'
+        x (array-like): Optimization decision vector
+        optimization_variables (dict): Variable definitions/options/bounds
+
     Returns:
-        dict: Parameter dictionary for envelope optimization
+        dict: Parameters suitable for modify_idf
     """
-    params = {}
+    opt = optimization_type.lower()
+    params: dict = {}
+
+    if opt == 'shading':
+        # Continuous variables within bounds
+        var_idx = 0
+        for var_name, bounds in optimization_variables.items():
+            value = float(x[var_idx])
+            value = max(bounds['min'], min(bounds['max'], value))
+            params[var_name] = value
+            var_idx += 1
+
+        # Build nested shading dimensions for geometry creation
+        dims: dict = {}
+        def ensure(side: str):
+            if side not in dims:
+                dims[side] = {}
+        if 'south_overhang' in params:
+            ensure('south')
+            dims['south']['overhang'] = {'length': params['south_overhang']}
+        if 'south_left_fin' in params:
+            ensure('south')
+            dims['south']['left_fin'] = {'length': params['south_left_fin']}
+        if 'south_right_fin' in params:
+            ensure('south')
+            dims['south']['right_fin'] = {'length': params['south_right_fin']}
+        if 'west_overhang' in params:
+            ensure('west')
+            dims['west']['overhang'] = {'length': params['west_overhang']}
+        if 'west_fin' in params:
+            ensure('west')
+            dims['west']['right_fin'] = {'length': params['west_fin']}
+
+        if dims:
+            params['shading_dimensions'] = dims
+        return params
+
+    # Envelope: categorical indexes and WWRs
     var_idx = 0
-    
     for var_name, var_options in optimization_variables.items():
         if var_name.startswith('wwr_'):
-            # WWR values are percentages, convert to decimal
             params[var_name] = var_options[int(x[var_idx])] / 100.0
         else:
-            # Construction names
             params[var_name] = var_options[int(x[var_idx])]
         var_idx += 1
-    
-    return params
 
-
-def x_to_params_shading(x, optimization_variables):
-    """Convert optimization variables x to parameter dictionary for shading optimization.
-    
-    Args:
-        x (array): Optimization variables array (continuous values)
-        optimization_variables (dict): Dictionary of optimization variables with bounds
-        
-    Returns:
-        dict: Parameter dictionary for shading optimization
-    """
-    params = {}
-    var_idx = 0
-    
-    for var_name, bounds in optimization_variables.items():
-        # x contains continuous values that are already in the correct range
-        # Just ensure they're within bounds
-        value = float(x[var_idx])
-        value = max(bounds['min'], min(bounds['max'], value))
-        params[var_name] = value
-        var_idx += 1
-
-    # Also construct nested shading dimensions for direct consumption by
-    # create_shading_elements_by_orientation in modify_idf.
-    dims = {}
-    def ensure(side):
-        if side not in dims:
-            dims[side] = {}
-    if 'south_overhang' in params:
-        ensure('south')
-        dims['south']['overhang'] = {'length': params['south_overhang']}
-    if 'south_left_fin' in params:
-        ensure('south')
-        dims['south']['left_fin'] = {'length': params['south_left_fin']}
-    if 'south_right_fin' in params:
-        ensure('south')
-        dims['south']['right_fin'] = {'length': params['south_right_fin']}
-    if 'west_overhang' in params:
-        ensure('west')
-        dims['west']['overhang'] = {'length': params['west_overhang']}
-    if 'west_fin' in params:
-        ensure('west')
-        dims['west']['right_fin'] = {'length': params['west_fin']}
-
-    if dims:
-        params['shading_dimensions'] = dims
+    # Duplicate construction keys to names used by modify_idf
+    if 'wall_construction' in params:
+        params['external_wall'] = params['wall_construction']
+    if 'roof_construction' in params:
+        params['roof'] = params['roof_construction']
+    if 'window_construction' in params:
+        params['window'] = params['window_construction']
 
     return params
-
-
-def get_x_to_params_function(optimization_type):
-    """Get the appropriate parameter conversion function based on optimization type.
-    
-    Args:
-        optimization_type (str): Either 'envelope' or 'shading'
-        
-    Returns:
-        function: The appropriate x_to_params function
-    """
-    if optimization_type.lower() == 'shading':
-        return x_to_params_shading
-    else:
-        return x_to_params_envelope

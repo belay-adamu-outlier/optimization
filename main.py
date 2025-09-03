@@ -44,7 +44,7 @@ from util.data_utils import (
 from util.pymoo_utils import (
     get_optimization_variables, 
     get_problem_constraints, 
-    get_x_to_params_function
+    get_params,
 )
 
 
@@ -326,9 +326,8 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
     def _evaluate(self, x, out, *args, **kwargs):
         try:
             
-            # Get the appropriate parameter conversion function based on optimization type
-            x_to_params_func = get_x_to_params_function(self.optimization_type)
-            params = x_to_params_func(x, self.optimization_variables)            
+            # Convert x to params based on optimization type
+            params = get_params(self.optimization_type, x, self.optimization_variables)
             # Create unique key for this combination
             combination_key = make_cache_key(params)
             
