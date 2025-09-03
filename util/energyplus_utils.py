@@ -910,7 +910,7 @@ def modify_idf(idf, parameters, save=False, save_path=None):
     
     Args:
         idf: IDF object to modify
-        parameters (dict): Dictionary containing either envelope or shading parameters:
+        parameters (dict): Dictionary containing envelope parameters and optional shading dimensions:
             Envelope parameters:
             - 'external_wall': External wall construction name
             - 'roof': Roof construction name
@@ -922,12 +922,12 @@ def modify_idf(idf, parameters, save=False, save_path=None):
             - 'wwr_south': Window-to-wall ratio for south facade
             - 'shading_schedule': 144-long list (6 elements × 4 seasons × 6 periods)
             
-            Shading parameters:
-            - 'south_overhang': Overhang length for south facade
-            - 'south_right_fin': Right fin length for south facade
-            - 'south_left_fin': Left fin length for south facade
-            - 'west_overhang': Overhang length for west facade
-            - 'west_fin': Fin length for west facade
+            Shading geometry (preferred):
+            - 'shading_dimensions': nested dict with keys per orientation, e.g.
+                {
+                  'south': {'overhang': {'length': 0.6}, 'left_fin': {'length': 0.4}},
+                  'west':  {'overhang': {'length': 0.3}, 'right_fin': {'length': 0.5}}
+                }
         save (bool): Whether to save the modified IDF file
         save_path (str, optional): Path to save the modified IDF file. If None, uses original path
     
@@ -938,79 +938,52 @@ def modify_idf(idf, parameters, save=False, save_path=None):
     if parameters is None:
         parameters = {}
     
-    # Check if these are envelope parameters or shading parameters
-    is_envelope = any(key in parameters for key in ['external_wall', 'roof', 'window', 'infiltration_ach', 'wwr_east', 'wwr_west', 'wwr_north', 'wwr_south', 'wall_solar_absorptance', 'roof_solar_absorptance', 'shading_schedule'])
-    is_shading = any(key in parameters for key in ['south_overhang', 'south_right_fin', 'south_left_fin', 'west_overhang', 'west_fin'])
-    
-    if is_envelope:
-        # Apply envelope parameters
-        if 'external_wall' in parameters:
-            apply_construction_to_surfaces(idf, parameters['external_wall'], 'Wall')
-        
-        if 'roof' in parameters:
-            apply_construction_to_surfaces(idf, parameters['roof'], 'Roof')
-        
-        if 'window' in parameters:
-            apply_construction_to_surfaces(idf, parameters['window'], 'Window')
-        
-        # Apply infiltration
-        if 'infiltration_ach' in parameters:
-            apply_infiltration_to_zones(idf, parameters['infiltration_ach'])
-        
-        # Apply WWR
-        if all(key in parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
-            apply_wwr_to_windows(idf, 
-                               parameters['wwr_east'],
-                               parameters['wwr_west'],
-                               parameters['wwr_north'],
-                               parameters['wwr_south'])
-        
-        # Apply albedo
-        if 'wall_solar_absorptance' in parameters or 'roof_solar_absorptance' in parameters:
-            albedo_dict = {}
-            if 'wall_solar_absorptance' in parameters:
-                albedo_dict["Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134"] = parameters['wall_solar_absorptance']
-                albedo_dict["Cement/plaster/mortar - cement panels wood fibres_.0134"] = parameters['wall_solar_absorptance']
-            if 'roof_solar_absorptance' in parameters:
-                albedo_dict["Bitumen felt/sheet_.19"] = parameters['roof_solar_absorptance']
-                albedo_dict["Bitumen felt/sheet_.003"] = parameters['roof_solar_absorptance']
-            
-            if albedo_dict:  # Only call if we have values to apply
-                apply_solar_absorptance_to_surfaces(idf, albedo_dict)
-        
-        # Apply shading schedules
-        if 'shading_schedule' in parameters:
-            idf = apply_shading_schedules_to_idf(idf, parameters['shading_schedule'])
-    
-    if is_shading:
-        # Apply shading geometry parameters
-        shading_dimensions = {}
-        for key, value in parameters.items():
-            if key.startswith('south_') or key.startswith('west_'):
-                if key == 'south_overhang':
-                    if 'south' not in shading_dimensions:
-                        shading_dimensions['south'] = {}
-                    shading_dimensions['south']['overhang'] = {'length': value}
-                elif key == 'south_left_fin':
-                    if 'south' not in shading_dimensions:
-                        shading_dimensions['south'] = {}
-                    shading_dimensions['south']['left_fin'] = {'length': value}
-                elif key == 'south_right_fin':
-                    if 'south' not in shading_dimensions:
-                        shading_dimensions['south'] = {}
-                    shading_dimensions['south']['right_fin'] = {'length': value}
-                elif key == 'west_overhang':
-                    if 'west' not in shading_dimensions:
-                        shading_dimensions['west'] = {}
-                    shading_dimensions['west']['overhang'] = {'length': value}
-                elif key == 'west_fin':
-                    if 'west' not in shading_dimensions:
-                        shading_dimensions['west'] = {}
-                    shading_dimensions['west']['fin'] = {'length': value}
-        
-        # Create shading elements using the existing function
+    # Apply envelope-related parameters when present
+    if 'external_wall' in parameters:
+        apply_construction_to_surfaces(idf, parameters['external_wall'], 'Wall')
+
+    if 'roof' in parameters:
+        apply_construction_to_surfaces(idf, parameters['roof'], 'Roof')
+
+    if 'window' in parameters:
+        apply_construction_to_surfaces(idf, parameters['window'], 'Window')
+
+    # Apply infiltration
+    if 'infiltration_ach' in parameters:
+        apply_infiltration_to_zones(idf, parameters['infiltration_ach'])
+
+    # Apply WWR only if all four orientations are provided
+    if all(key in parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
+        apply_wwr_to_windows(
+            idf,
+            parameters['wwr_east'],
+            parameters['wwr_west'],
+            parameters['wwr_north'],
+            parameters['wwr_south']
+        )
+
+    # Apply albedo
+    if 'wall_solar_absorptance' in parameters or 'roof_solar_absorptance' in parameters:
+        albedo_dict = {}
+        if 'wall_solar_absorptance' in parameters:
+            albedo_dict["Cement/plaster/mortar - cement fibreboard magnesium oxysulphide binder_.0134"] = parameters['wall_solar_absorptance']
+            albedo_dict["Cement/plaster/mortar - cement panels wood fibres_.0134"] = parameters['wall_solar_absorptance']
+        if 'roof_solar_absorptance' in parameters:
+            albedo_dict["Bitumen felt/sheet_.19"] = parameters['roof_solar_absorptance']
+            albedo_dict["Bitumen felt/sheet_.003"] = parameters['roof_solar_absorptance']
+
+        if albedo_dict:  # Only call if we have values to apply
+            apply_solar_absorptance_to_surfaces(idf, albedo_dict)
+
+    # Apply shading schedules
+    if 'shading_schedule' in parameters:
+        idf = apply_shading_schedules_to_idf(idf, parameters['shading_schedule'])
+
+    # Create shading elements if provided as nested dimensions
+    shading_dimensions = parameters.get('shading_dimensions')
+    if shading_dimensions:
         idf = create_shading_elements_by_orientation(idf, shading_dimensions)
-    
+
     # Save the modified IDF file if requested
     if save:
         save_path = save_path or idf.idfname

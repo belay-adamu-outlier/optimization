@@ -125,7 +125,32 @@ def x_to_params_shading(x, optimization_variables):
         value = max(bounds['min'], min(bounds['max'], value))
         params[var_name] = value
         var_idx += 1
-    
+
+    # Also construct nested shading dimensions for direct consumption by
+    # create_shading_elements_by_orientation in modify_idf.
+    dims = {}
+    def ensure(side):
+        if side not in dims:
+            dims[side] = {}
+    if 'south_overhang' in params:
+        ensure('south')
+        dims['south']['overhang'] = {'length': params['south_overhang']}
+    if 'south_left_fin' in params:
+        ensure('south')
+        dims['south']['left_fin'] = {'length': params['south_left_fin']}
+    if 'south_right_fin' in params:
+        ensure('south')
+        dims['south']['right_fin'] = {'length': params['south_right_fin']}
+    if 'west_overhang' in params:
+        ensure('west')
+        dims['west']['overhang'] = {'length': params['west_overhang']}
+    if 'west_fin' in params:
+        ensure('west')
+        dims['west']['right_fin'] = {'length': params['west_fin']}
+
+    if dims:
+        params['shading_dimensions'] = dims
+
     return params
 
 
