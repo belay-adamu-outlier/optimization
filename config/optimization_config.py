@@ -127,59 +127,7 @@ class EvaluationCallback(Callback):
         self.previous_cache_size = current_cache_size
 
         # Rebuild solutions listing from cache for plotting/reporting
-        self.solutions_by_key = {}
-        self.solutions_by_generation = {}
-        self.all_objectives = []
-
-        if self.shared_cache is not None:
-            for i, (combination_key, cache_entry) in enumerate(self.shared_cache.items()):
-                if isinstance(cache_entry, dict) and 'objectives' in cache_entry:
-                    objectives = cache_entry['objectives']
-                    generation = cache_entry.get('generation', 0)
-                    params = cache_entry.get('params')
-                    iteration = i + 1
-                    max_overheating_hours = cache_entry.get('max_overheating_hours')
-                    tedi, overheating = objectives
-
-                    solution_dict = {
-                        'generation': generation,
-                        'iteration': iteration,
-                        'thermal_energy_demand_intensity': tedi,
-                        'average_overheating_hours': overheating,
-                        (
-                            'max_overheating_hours' if self.constrained_analysis else 'pareto_optimal'
-                        ): max_overheating_hours if self.constrained_analysis else False,
-                    }
-
-                    if self.constrained_analysis and self.overheating_criterion.upper() == 'CIBSE59':
-                        solution_dict['max_living_room_overheating'] = cache_entry.get(
-                            'max_living_room_overheating', 0.0
-                        )
-                        solution_dict['max_bedroom_overheating'] = cache_entry.get(
-                            'max_bedroom_overheating', 0.0
-                        )
-
-                    if self.optimization_type == 'shading':
-                        solution_dict['max_living_room_overheating'] = cache_entry.get(
-                            'max_living_room_overheating', 0.0
-                        )
-                        solution_dict['max_bedroom_overheating'] = cache_entry.get(
-                            'max_bedroom_overheating', 0.0
-                        )
-                        solution_dict['total_shading_area'] = cache_entry.get('total_shading_area', 0.0)
-
-                    if params:
-                        for var_name in self.variable_names:
-                            solution_dict[var_name] = params.get(var_name, "N/A")
-                    else:
-                        for var_name in self.variable_names:
-                            solution_dict[var_name] = "N/A"
-
-                    self.solutions_by_key[combination_key] = solution_dict
-                    if generation not in self.solutions_by_generation:
-                        self.solutions_by_generation[generation] = []
-                    self.solutions_by_generation[generation].append(combination_key)
-                    self.all_objectives.append([tedi, overheating])
+        self._rebuild_solutions_from_cache()
 
         if not self.constrained_analysis:
             update_pareto_optimality_for_display(self.solutions_by_key, self.all_objectives)
@@ -240,6 +188,59 @@ class EvaluationCallback(Callback):
             skipped_evaluations,
             current_cache_size,
         )
+
+    def _rebuild_solutions_from_cache(self):
+        """Rebuilds in-memory solution mappings and objectives from the shared cache.
+
+        Populates:
+        - self.solutions_by_key: key -> solution summary dict
+        - self.solutions_by_generation: generation -> [keys]
+        - self.all_objectives: [[tedi, overheating], ...]
+        """
+        # Reset containers
+        self.solutions_by_key = {}
+        self.solutions_by_generation = {}
+        self.all_objectives = []
+
+        if not self.shared_cache:
+            return
+
+        cibse59 = self.overheating_criterion.upper() == 'CIBSE59'
+
+        for iteration, (combination_key, entry) in enumerate(self.shared_cache.items(), start=1):
+            if not isinstance(entry, dict) or 'objectives' not in entry:
+                continue
+
+            tedi, overheating = entry['objectives']
+            generation = entry.get('generation', 0)
+            params = entry.get('params') or {}
+
+            solution = {
+                'generation': generation,
+                'iteration': iteration,
+                'thermal_energy_demand_intensity': tedi,
+                'average_overheating_hours': overheating,
+            }
+
+            if self.constrained_analysis:
+                solution['max_overheating_hours'] = entry.get('max_overheating_hours')
+                if cibse59:
+                    solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
+                    solution['max_bedroom_overheating'] = entry.get('max_bedroom_overheating', 0.0)
+            else:
+                solution['pareto_optimal'] = False
+
+            if self.optimization_type == 'shading':
+                solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
+                solution['max_bedroom_overheating'] = entry.get('max_bedroom_overheating', 0.0)
+                solution['total_shading_area'] = entry.get('total_shading_area', 0.0)
+
+            for var_name in self.variable_names:
+                solution[var_name] = params.get(var_name, "N/A")
+
+            self.solutions_by_key[combination_key] = solution
+            self.solutions_by_generation.setdefault(generation, []).append(combination_key)
+            self.all_objectives.append([tedi, overheating])
 
     def save_final_results(self):
         save_final_results(
