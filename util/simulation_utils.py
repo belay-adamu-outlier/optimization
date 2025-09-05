@@ -340,18 +340,11 @@ def set_in_cache(
             'max_overheating_hours': max_overheating_hours,
             'generation': generation,
             'iteration': iteration,
-            'params': params
-        }
-        
-        # Add CIBSE59 specific values if provided
-        if max_living_room_overheating is not None:
-            cache_entry['max_living_room_overheating'] = max_living_room_overheating
-        if max_bedroom_overheating is not None:
-            cache_entry['max_bedroom_overheating'] = max_bedroom_overheating
-        # Add total shading area if provided (for shading optimization)
-        if total_shading_area is not None:
-            cache_entry['total_shading_area'] = total_shading_area
-            
+            'params': params,
+            'max_living_room_overheating': max_living_room_overheating or 0.0,
+            'max_bedroom_overheating': max_bedroom_overheating or 0.0,
+            'total_shading_area': total_shading_area or 0.0,
+        }     
         cache[key] = cache_entry
     else:
         cache[key] = value
@@ -432,3 +425,31 @@ def save_cache_to_file(cache, generation, debug_dir="debug_cache"):
     except Exception as e:
         print(f"Warning: Could not save debug cache file: {e}")
 
+def populate_with_cache(
+    shared_cache, 
+    combination_key, 
+    is_constrained_analysis,
+    out
+):
+    """Try to populate outputs from shared cache and indicate if handled.
+        Returns True if cache hit and outputs were set (caller should return),
+        otherwise False to proceed with evaluation.
+    """
+    if shared_cache is None:
+        return False
+
+    cached_result = get_from_cache(shared_cache, combination_key)
+    if cached_result is None:
+        return False
+
+    out["F"] = cached_result if not is_constrained_analysis else [cached_result[0]]
+    
+    if not is_constrained_analysis:
+        return True
+        
+    lr = cached_result['max_living_room_overheating'] or 0.0
+    br = cached_result['max_bedroom_overheating'] or 0.0
+    tsa = cached_result['total_shading_area'] or 0.0
+    out["G"] = [lr - 110, br - 32, tsa - 110]
+
+    return True

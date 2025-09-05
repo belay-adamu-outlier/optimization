@@ -25,8 +25,8 @@ from util.pymoo_utils import (
 )
 from util.simulation_utils import (
     make_cache_key,
-    get_from_cache,
     set_in_cache,
+    populate_with_cache,
 )
 from util.data_utils import (
     print_optimization_table,
@@ -39,18 +39,13 @@ from util.data_utils import (
     initialize_shading_optimization_plot,
     update_shading_optimization_plot,
     print_generation_summary,
+    generate_dummy_data
 )
 from util.energyplus_utils import (
     run_simulation,
     analyze_simulation_results,
 )
-from util.data_utils import (
-    generate_dummy_envelope_results,
-    generate_dummy_shading_results,
-)
 import os
-
-
 class EvaluationCallback(Callback):
     def __init__(
         self,
@@ -315,33 +310,14 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             params = get_params(self.optimization_type, x, self.optimization_variables)
             combination_key = make_cache_key(params)
 
-            if self.shared_cache is not None:
-                cached_result = get_from_cache(self.shared_cache, combination_key)
-                if cached_result is not None:
-                    objectives, max_overheating_hours = cached_result
-                    out["F"] = objectives if not self.constrained_analysis else [objectives[0]]
-                    if self.constrained_analysis:
-                        if self.overheating_criterion.upper() == 'CIBSE59':
-                            cache_entry = self.shared_cache[combination_key]
-                            if (
-                                isinstance(cache_entry, dict)
-                                and 'max_living_room_overheating' in cache_entry
-                                and 'max_bedroom_overheating' in cache_entry
-                            ):
-                                lr = cache_entry['max_living_room_overheating'] or 0.0
-                                br = cache_entry['max_bedroom_overheating'] or 0.0
-                                out["G"] = [lr - 110, br - 32]
-                        else:
-                            out["G"] = [max_overheating_hours - 30]
-                    return
+            # Short-circuit if result already in cache
+            if populate_with_cache(self.shared_cache, combination_key, self.constrained_analysis, out):
+                return
 
             process_id = os.getpid()
 
             if self.test_mode:
-                if self.optimization_type == 'shading':
-                    results = generate_dummy_shading_results(params, self.overheating_criterion)
-                else:
-                    results = generate_dummy_envelope_results(params, self.overheating_criterion)
+                results = generate_dummy_data(params, self.optimization_type, self.overheating_criterion)
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 output_dir = run_simulation(
@@ -387,27 +363,13 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             out["F"] = objectives if not self.constrained_analysis else [objectives[0]]
             if not self.constrained_analysis:
                 return
-            if self.optimization_type == 'shading':
-                out["G"] = [lr - 110, br - 32, total_area - 110]
-            else:
-                if self.overheating_criterion.upper() == 'CIBSE59':
-                    out["G"] = [lr - 110, br - 32]
-                else:
-                    out["G"] = [max_overheating_hours - 30]
-        except Exception as e:
+            out["G"] = [lr - 110, br - 32, total_area - 110]
+            
+        except Exception as _:
             out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
-            if self.constrained_analysis:
-                if self.optimization_type == 'shading':
-                    if self.overheating_criterion.upper() == 'CIBSE59':
-                        out["G"] = [1000.0, 1000.0, 1000.0]
-                    else:
-                        out["G"] = [1000.0, 1000.0]
-                else:
-                    if self.overheating_criterion.upper() == 'CIBSE59':
-                        out["G"] = [1000.0, 1000.0]
-                    else:
-                        out["G"] = [1000.0]
-
+            if not self.constrained_analysis:
+                return
+            out["G"] = [1000.0, 1000.0, 1000.0]
 
 def create_runner(num_workers: int) -> Tuple[StarmapParallelization, Optional[object]]:
     if num_workers > 1:
@@ -424,7 +386,6 @@ def cleanup_pool(pool):
         pool.close()
         pool.join()
         print("Closed multiprocessing pool")
-
 
 def create_algorithm(optimization_type, population_size=None, crossover_prob=None, mutation_prob=None) -> NSGA2:
     vtype = float if optimization_type == 'shading' else int

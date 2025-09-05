@@ -1083,6 +1083,17 @@ def generate_dummy_envelope_results(params, overheating_criterion='ASHRAE'):
         'max_living_room_overheating': max_living_room_overheating,
         'max_bedroom_overheating': max_bedroom_overheating
     }
+    
+def generate_dummy_data(
+    params, 
+    optimization_type='shading',
+    overheating_criterion='ASHRAE', 
+):
+    
+    if optimization_type == 'shading':
+        return generate_dummy_shading_results(params, overheating_criterion)
+    else:
+        return generate_dummy_envelope_results(params, overheating_criterion)
 
 
 def print_generation_summary(generation, total_evaluations, new_evaluations, skipped_evaluations, cache_size):
