@@ -8,6 +8,7 @@ calculates average overheating, and organizes output files.
 import os
 import gc
 import shutil
+import math
 from datetime import datetime
 from eppy.modeleditor import IDF
 from .simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
@@ -309,12 +310,20 @@ def create_shading_elements_by_orientation(idf, dimensions):
         - Vertices are ordered counter-clockwise when viewed from outside the building
     """
     fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
+    walls = idf.idfobjects.get('BUILDINGSURFACE:DETAILED', [])
     
     # Handle None dimensions gracefully
     if dimensions is None:
         return idf
     
     for fenestration in fenestrations:
+        wall = None
+        
+        for w in walls:
+            if w.Name == fenestration.Building_Surface_Name:
+                wall = w
+                break
+            
         wall_name = fenestration.Building_Surface_Name.lower()
         
         # Get fenestration geometry
@@ -322,32 +331,41 @@ def create_shading_elements_by_orientation(idf, dimensions):
         if not fen_vertices:
             continue
             
-        # Create overhangs
-        if 'south' in wall_name and 'south' in dimensions:
-            if 'overhang' in dimensions['south']:
-                _create_overhang(idf, fenestration, fen_vertices, 
-                               dimensions['south']['overhang']['length'], 'south')
-            if 'right_fin' in dimensions['south']:
-                _create_fin(idf, fenestration, fen_vertices, 0,
-                           dimensions['south']['right_fin']['length'], 'south')
-            if 'left_fin' in dimensions['south']:
-                _create_fin(idf, fenestration, fen_vertices,
-                           dimensions['south']['left_fin']['length'], 0, 'south')
-        if 'west' in wall_name and 'west' in dimensions:
-            if 'overhang' in dimensions['west']:
-                _create_overhang(idf, fenestration, fen_vertices,
-                               dimensions['west']['overhang']['length'], 'west')
-            if 'right_fin' in dimensions['west']:
-                _create_fin(idf, fenestration, fen_vertices,
-                           0.0, dimensions['west']['right_fin']['length'], 'west')
-                               
-        if 'east' in wall_name and 'east' in dimensions:
-            if 'overhang' in dimensions['east']:
-                _create_overhang(idf, fenestration, fen_vertices,
-                               dimensions['east']['overhang']['length'], 'east')
-            if 'left_fin' in dimensions['east']:
-                _create_fin(idf, fenestration, fen_vertices,
-                           0.0, dimensions['east']['left_fin']['length'], 'east')
+        # Create shading elements
+        orientations = ['south', 'west']
+        
+        for orientation in orientations:
+    
+            if orientation in wall_name and orientation in dimensions:
+                if 'overhang' in dimensions[orientation]:
+                    _create_overhang(
+                        idf, 
+                        fenestration, 
+                        fen_vertices,
+                        dimensions[orientation]['overhang'], 
+                        orientation,
+                        wall
+                    )
+                if 'right_fin' in dimensions[orientation]:
+                    _create_fin(
+                        idf, 
+                        fenestration, 
+                        fen_vertices,
+                        0, 
+                        dimensions[orientation]['right_fin']['depth'], 
+                        orientation,
+                        overhang_angle = dimensions[orientation].get('overhang', {}).get('angle', 0)
+                    )
+                if 'left_fin' in dimensions[orientation]:
+                    _create_fin(
+                        idf, 
+                        fenestration, 
+                        fen_vertices,
+                        dimensions[orientation]['left_fin']['depth'],
+                        0, 
+                        orientation,
+                        overhang_angle = dimensions[orientation].get('overhang', {}).get('angle', 0)
+                    )
     
     return idf
 
@@ -368,10 +386,27 @@ def _get_fenestration_vertices(fenestration):
     return vertices if len(vertices) >= 3 else None
 
 
-def _create_overhang(idf, fenestration, fen_vertices, depth, orientation):
+def _create_overhang(
+    idf, 
+    fenestration, 
+    fen_vertices, 
+    params, 
+    orientation,
+    wall
+):
     """Create an overhang shading element with proper counter-clockwise vertex ordering."""
     if not fen_vertices or len(fen_vertices) < 3:
         return
+
+    depth, width, angle = params['depth'], params['width'], params['angle']
+    wall_width = 0
+    
+    if orientation == 'south':
+        wall_width = wall.Vertex_2_Xcoordinate - wall.Vertex_1_Xcoordinate
+    elif orientation == 'west':
+        wall_width = wall.Vertex_1_Ycoordinate - wall.Vertex_2_Ycoordinate
+    elif orientation == 'east':
+        wall_width = wall.Vertex_2_Ycoordinate - wall.Vertex_1_Ycoordinate
     
     # Calculate overhang geometry
     # Overhang extends outward from the building (negative Z direction for most orientations)
@@ -384,33 +419,36 @@ def _create_overhang(idf, fenestration, fen_vertices, depth, orientation):
     
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
-    min_z, max_z = min(zs), max(zs)
-    
+    _, max_z = min(zs), max(zs)
+    min_z = max_z - math.tan(angle * math.pi / 180) * depth
     # Create overhang vertices (counter-clockwise when viewed from outside)
     # Extend outward from the building surface
     if orientation == 'south':
         # South overhang extends north (negative Y)
+        width_diff = wall_width * width - (max_x - min_x)
         vertices = [
-            (min_x, max_y - depth, max_z),      # Vertex 1: bottom-left
-            (max_x, max_y - depth, max_z),      # Vertex 2: bottom-right
-            (max_x, max_y, max_z),              # Vertex 3: top-right
-            (min_x, max_y, max_z),              # Vertex 4: top-left
+            (min_x - width_diff/2, max_y - depth, min_z),     # Vertex 1: bottom-left
+            (max_x + width_diff/2, max_y - depth, min_z),     # Vertex 2: bottom-right
+            (max_x + width_diff/2, max_y, max_z),             # Vertex 3: top-right
+            (min_x - width_diff/2, max_y, max_z),             # Vertex 4: top-left
         ]
     elif orientation == 'west':
         # West overhang extends west (negative X)
+        width_diff = wall_width * width - (max_y - min_y)
         vertices = [
-            (min_x, min_y, max_z),           # Vertex 1: bottom-left
-            (min_x, max_y, max_z),           # Vertex 2: bottom-right
-            (min_x - depth, max_y, max_z),   # Vertex 3: top-right
-            (min_x - depth, min_y, max_z),   # Vertex 4: top-left
+            (min_x, min_y - width_diff/2, min_z),             # Vertex 1: bottom-left
+            (min_x, max_y + width_diff/2, min_z),             # Vertex 2: bottom-right
+            (min_x - depth, max_y + width_diff/2, max_z),     # Vertex 3: top-right
+            (min_x - depth, min_y - width_diff/2, max_z),     # Vertex 4: top-left
         ]
     elif orientation == 'east':
         # East overhang extends east (positive X)
+        width_diff = wall_width * width - (max_y - min_y)
         vertices = [
-            (max_x, min_y, max_z),           # Vertex 1: bottom-left
-            (max_x, max_y, max_z),           # Vertex 2: bottom-right
-            (max_x + depth, max_y, max_z),   # Vertex 3: top-right
-            (max_x + depth, min_y, max_z),   # Vertex 4: top-left
+            (max_x + depth, min_y - width_diff/2, min_z),     # Vertex 1: bottom-left
+            (max_x + depth, max_y + width_diff/2, min_z),     # Vertex 2: bottom-right
+            (max_x, max_y + width_diff/2, max_z),             # Vertex 3: top-right
+            (max_x, min_y - width_diff/2, max_z),             # Vertex 4: top-left
         ]
     else:
         return
@@ -434,7 +472,8 @@ def _create_fin(
     fen_vertices, 
     left_depth, 
     right_depth, 
-    orientation
+    orientation,
+    overhang_angle = 0
 ):
     """Create a fin shading element with proper counter-clockwise vertex ordering."""
     if not fen_vertices or len(fen_vertices) < 3:
@@ -452,40 +491,70 @@ def _create_fin(
     min_z, max_z = min(zs), max(zs)
     
     # print(min_x, max_x)
+    fin_depth = left_depth if left_depth > 0 else right_depth
+    middle_z = max_z - math.tan(overhang_angle * math.pi / 180) * fin_depth
     
+    has_three_vertices = middle_z < min_z
+    new_depth = 1.5 * math.cos(overhang_angle * math.pi / 180) if has_three_vertices else fin_depth
     # Create fin vertices (counter-clockwise when viewed from outside)
     if orientation == 'south' and left_depth > 0:
         # South fin extends sourth from left of fenestration (negative Y direction) as seen from east side of building
         vertices = [
-            (min_x, min_y - left_depth, min_z),      # Vertex 1: bottom-left
-            (min_x, min_y, min_z),     # Vertex 2: bottom-right
-            (min_x, min_y, max_z),     # Vertex 3: top-right
-            (min_x, min_y - left_depth, max_z),      # Vertex 4: top-left
+            (min_x, min_y - new_depth, min_z),      # Vertex 1: bottom-left
+            (min_x, min_y, min_z),                  # Vertex 2: bottom-right
+            (min_x, min_y, max_z),                  # Vertex 3: top-right     
         ]
+        
+        if not has_three_vertices:
+            vertices.append((
+                min_x, 
+                min_y - new_depth, 
+                max_z - math.tan(overhang_angle * math.pi / 180) * new_depth
+            ))  # Vertex 4: top-left
     elif orientation == 'south' and right_depth > 0:
         # South fin extends south from right of fenestration (negative Y direction) as seen from east side of building
         vertices = [
-            (max_x, min_y - right_depth, min_z),      # Vertex 1: bottom-left
-            (max_x, min_y, min_z),     # Vertex 2: bottom-right
-            (max_x, min_y, max_z),     # Vertex 3: top-right
-            (max_x, min_y  - right_depth, max_z),      # Vertex 4: top-left
+            (max_x, min_y - new_depth, min_z),      # Vertex 1: bottom-left
+            (max_x, min_y, min_z),                  # Vertex 2: bottom-right
+            (max_x, min_y, max_z)                   # Vertex 3: top-right     
         ]
+        
+        if not has_three_vertices:
+            vertices.append((
+                min_x, 
+                min_y - new_depth, 
+                max_z - math.tan(overhang_angle * math.pi / 180) * new_depth
+            )) # Vertex 4: top-left
+
     elif orientation == 'west':
         # West fin extends west (negative X direction) as seen from north side of building
         vertices = [
-            (min_x, min_y , min_z),      # Vertex 1: bottom-left
-            (min_x - right_depth, min_y, min_z),     # Vertex 2: bottom-right
-            (min_x - right_depth, min_y, max_z),     # Vertex 3: top-right
-            (min_x, min_y, max_z),      # Vertex 4: top-left
+            (min_x, min_y, max_z),                  # Vertex 1: top-left
+            (min_x, min_y , min_z),                 # Vertex 2: bottom-left
+            (min_x - new_depth, min_y, min_z)       # Vertex 3: bottom-right
         ]
+        
+        if not has_three_vertices:
+            vertices.append((
+                min_x - new_depth, 
+                min_y, 
+                max_z - math.tan(overhang_angle * math.pi / 180) * new_depth
+            )) # Vertex 4: top-right
+
     elif orientation == 'east':
         # East fin extends east (positive X direction)
         vertices = [
-            (max_x, min_y - left_depth, min_z),      # Vertex 1: bottom-left
-            (max_x, max_y + right_depth, min_z),     # Vertex 2: bottom-right
-            (max_x, max_y + right_depth, max_z),     # Vertex 3: top-right
-            (max_x, min_y - left_depth, max_z),      # Vertex 4: top-left
+            (max_x + new_depth, min_y, min_z),      # Vertex 1: bottom-left
+            (max_x, max_y, min_z),                  # Vertex 2: bottom-right
+            (max_x, max_y, max_z)                   # Vertex 3: top-right
         ]
+        
+        if not has_three_vertices:
+            vertices.append((
+                max_x + new_depth, 
+                min_y, 
+                max_z - math.tan(overhang_angle * math.pi / 180) * new_depth
+            )) # Vertex 4: top-right
     else:
         return
     
@@ -493,7 +562,7 @@ def _create_fin(
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
     shading.Name = f'{orientation.capitalize()} Fin {fenestration.Name} {'Left' if left_depth > 0 else 'Right'}'
     shading.Transmittance_Schedule_Name = 'South Overhang Shading Schedule'
-    shading.Number_of_Vertices = 4
+    shading.Number_of_Vertices = len(vertices)
     
     # Set vertices with proper counter-clockwise ordering
     for i, (x, y, z) in enumerate(vertices, 1):

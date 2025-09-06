@@ -32,11 +32,15 @@ def initialize_shading_optimization_variables():
         dict: Dictionary of shading optimization variables with continuous bounds
     """
     return {
-        'south_overhang': {'min': 0.0, 'max': 5.0},
-        'south_left_fin': {'min': 0.0, 'max': 5.0},
-        'south_right_fin': {'min': 0.0, 'max': 5.0},
-        'west_overhang': {'min': 0.0, 'max': 5.0},
-        'west_fin': {'min': 0.0, 'max': 5.0}
+        'south_overhang_depth': {'min': 0.0, 'max': 5.0},
+        'south_overhang_width': {'min': 0.0, 'max': 1.0},
+        'south_overhang_angle': {'min': 0.0, 'max': 60.0},
+        'south_left_fin_depth': {'min': 0.0, 'max': 5.0},
+        'south_right_fin_depth': {'min': 0.0, 'max': 5.0},
+        'west_overhang_depth': {'min': 0.0, 'max': 5.0},
+        'west_overhang_width': {'min': 0.0, 'max': 1.0},
+        'west_overhang_angle': {'min': 0.0, 'max': 60.0},
+        'west_right_fin_depth': {'min': 0.0, 'max': 5.0}
     }
 
 
@@ -108,24 +112,25 @@ def get_params(optimization_type, x, optimization_variables):
 
         # Build nested shading dimensions for geometry creation
         dims: dict = {}
+        
         def ensure(side: str):
             if side not in dims:
                 dims[side] = {}
-        if 'south_overhang' in params:
-            ensure('south')
-            dims['south']['overhang'] = {'length': params['south_overhang']}
-        if 'south_left_fin' in params:
-            ensure('south')
-            dims['south']['left_fin'] = {'length': params['south_left_fin']}
-        if 'south_right_fin' in params:
-            ensure('south')
-            dims['south']['right_fin'] = {'length': params['south_right_fin']}
-        if 'west_overhang' in params:
-            ensure('west')
-            dims['west']['overhang'] = {'length': params['west_overhang']}
-        if 'west_fin' in params:
-            ensure('west')
-            dims['west']['right_fin'] = {'length': params['west_fin']}
+        
+        for side in ['south', 'west']:
+                ensure(side)
+                dims[side]['overhang'] = {
+                    'depth': params[f'{side}_overhang_depth'],
+                    'width': params[f'{side}_overhang_width'],
+                    'angle': params[f'{side}_overhang_angle']
+                }
+                
+                if f'{side}_left_fin_depth' in params:
+                    ensure(side)
+                    dims[side]['left_fin'] = {'depth': params[f'{side}_left_fin_depth']}
+                if f'{side}_right_fin_depth' in params:
+                    ensure(side)
+                    dims[side]['right_fin'] = {'depth': params[f'{side}_right_fin_depth']}
 
         if dims:
             params['shading_dimensions'] = dims
