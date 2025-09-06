@@ -77,11 +77,8 @@ def get_problem_constraints(optimization_type, constrained_analysis, overheating
     # For both ASHRAE and CIBSE59, use individual room overheating values
     base_constraints = 2  # max_living_room_overheating, max_bedroom_overheating
     
-    # Additional constraints for shading optimization
-    if optimization_type.lower() == 'shading':
-        return base_constraints + 1  # Add total_shading_area constraint
-    else:
-        return base_constraints
+    # Shading area is handled as a soft penalty on TEDI now
+    return base_constraints
 
 
 def get_params(optimization_type, x, optimization_variables):

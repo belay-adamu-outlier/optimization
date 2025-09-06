@@ -7,6 +7,51 @@ import re
 import json
 from multiprocessing import Manager
 
+
+def compute_shading_penalty(params: dict, optimization_variables: dict, optimization_type: str) -> float:
+    """Compute a TEDI penalty from shading decision variables without using derived areas.
+
+    Normalizes selected shading variables by their configured maxima and
+    scales the average to TEDI space. Only applies for optimization_type == 'shading'.
+
+    Args:
+        params: Parameter dict for the candidate (from cache or fresh eval).
+        optimization_variables: Variable bounds dict used by the optimizer.
+        optimization_type: 'shading' or other.
+
+    Returns:
+        Penalty value to add to TEDI.
+    """
+    try:
+        if optimization_type != 'shading' or not isinstance(params, dict):
+            return 0.0
+
+        keys = [
+            'south_overhang_depth',
+            'south_overhang_angle',
+            'south_left_fin_depth',
+            'south_right_fin_depth',
+            'west_overhang_depth',
+            'west_overhang_angle',
+            'west_right_fin_depth',
+        ]
+        vals = []
+        for k in keys:
+            if k in params:
+                v = float(params[k])
+                bounds = optimization_variables.get(k, {}) if isinstance(optimization_variables, dict) else {}
+                max_v = bounds.get('max') if isinstance(bounds, dict) else None
+                if max_v is None or max_v == 0:
+                    max_v = 60.0 if 'angle' in k else 5.0
+                vals.append(max(0.0, v) / float(max_v))
+        if not vals:
+            return 0.0
+        avg_norm = sum(vals) / len(vals)
+        penalty_scale = 4.0
+        return penalty_scale * avg_norm
+    except Exception:
+        return 0.0
+
 def parse_eso_variables(
     eso_file_path: str,
     variable_patterns: List[str],
@@ -330,7 +375,8 @@ def set_in_cache(
     params=None,
     max_living_room_overheating=None,
     max_bedroom_overheating=None,
-    total_shading_area=None
+    total_shading_area=None,
+    **extra
 ):
 
     """Set a value in the shared cache with optional generation info and parameters."""
@@ -344,7 +390,9 @@ def set_in_cache(
             'max_living_room_overheating': max_living_room_overheating or 0.0,
             'max_bedroom_overheating': max_bedroom_overheating or 0.0,
             'total_shading_area': total_shading_area or 0.0,
-        }     
+        }
+        if extra:
+            cache_entry.update(extra)
         cache[key] = cache_entry
     else:
         cache[key] = value
@@ -426,30 +474,42 @@ def save_cache_to_file(cache, generation, debug_dir="debug_cache"):
         print(f"Warning: Could not save debug cache file: {e}")
 
 def populate_with_cache(
-    shared_cache, 
-    combination_key, 
+    shared_cache,
+    combination_key,
     is_constrained_analysis,
-    out
+    out,
+    optimization_type=None,
+    optimization_variables=None
 ):
-    """Try to populate outputs from shared cache and indicate if handled.
-        Returns True if cache hit and outputs were set (caller should return),
-        otherwise False to proceed with evaluation.
+    """Try to serve results from cache and set outputs, including penalty.
+
+    - Leaves cache contents as raw (unpenalized) so plotting/CSV remain unaffected.
+    - Applies penalty on-the-fly to TEDI when setting out["F"].
     """
     if shared_cache is None:
         return False
 
-    cached_result = get_from_cache(shared_cache, combination_key)
-    if cached_result is None:
+    cached_entry = get_cache_entry(shared_cache, combination_key)
+    if not (isinstance(cached_entry, dict) and 'objectives' in cached_entry):
         return False
 
-    out["F"] = cached_result if not is_constrained_analysis else [cached_result[0]]
-    
-    if not is_constrained_analysis:
-        return True
-        
-    lr = cached_result['max_living_room_overheating'] or 0.0
-    br = cached_result['max_bedroom_overheating'] or 0.0
-    tsa = cached_result['total_shading_area'] or 0.0
-    out["G"] = [lr - 110, br - 32, tsa - 110]
+    objectives = list(cached_entry.get('objectives') or [])
+    if not objectives:
+        return False
+
+    tedi_raw = float(objectives[0])
+    overheating = float(objectives[1]) if len(objectives) > 1 else 0.0
+
+    # Compute penalty from cached params
+    params = cached_entry.get('params') or {}
+    tedi_penalized = tedi_raw + compute_shading_penalty(params, optimization_variables or {}, optimization_type or '')
+
+    out["F"] = [tedi_penalized] if is_constrained_analysis else [tedi_penalized, overheating]
+
+    # Constraints (overheating only)
+    lr = cached_entry.get('max_living_room_overheating', 0.0) or 0.0
+    br = cached_entry.get('max_bedroom_overheating', 0.0) or 0.0
+    if is_constrained_analysis:
+        out["G"] = [lr - 110, br - 32]
 
     return True

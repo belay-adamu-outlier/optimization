@@ -27,6 +27,7 @@ from util.simulation_utils import (
     make_cache_key,
     set_in_cache,
     populate_with_cache,
+    compute_shading_penalty,
 )
 from util.data_utils import (
     print_optimization_table,
@@ -306,13 +307,21 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
     def set_generation(self, generation):
         self.current_generation = generation
 
+
     def _evaluate(self, x, out, *args, **kwargs):
         try:
             params = get_params(self.optimization_type, x, self.optimization_variables)
             combination_key = make_cache_key(params)
 
-            # Short-circuit if result already in cache
-            if populate_with_cache(self.shared_cache, combination_key, self.constrained_analysis, out):
+            # Try cache first; if hit, populate out with penalized TEDI (cache remains raw)
+            if populate_with_cache(
+                self.shared_cache,
+                combination_key,
+                self.constrained_analysis,
+                out,
+                optimization_type=self.optimization_type,
+                optimization_variables=self.optimization_variables,
+            ):
                 return
 
             process_id = os.getpid()
@@ -322,7 +331,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 output_dir = run_simulation(
-                    idf_path="Building_SW_Shading_Renamed.idf",
+                    idf_path="Building_SW_Shading_Renamed - V2.idf",
                     weather_path=self.weather_file,
                     params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
@@ -343,16 +352,22 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 br = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
                 total_area = results.get('total_shading_area', 0.0) or 0.0
-                objectives = [tedi, overheating]
+                # Store raw objectives in cache; apply penalty now for optimizer
+                objectives_raw = [tedi, overheating]
+                penalty = compute_shading_penalty(params, self.optimization_variables, self.optimization_type)
+                tedi_with_penalty = tedi + penalty
             else:
-                objectives = [1000.0, 1000.0]
+                tedi = 1000.0
+                overheating = 1000.0
+                objectives_raw = [tedi, overheating]
+                tedi_with_penalty = tedi
                 lr, br, max_overheating_hours, total_area = 1000.0, 1000.0, 0.0, 1000.0
 
             if self.shared_cache is not None:
                 set_in_cache(
                     self.shared_cache,
                     combination_key,
-                    objectives,
+                    objectives_raw,
                     max_overheating_hours,
                     generation=self.current_generation,
                     params=params,
@@ -361,16 +376,19 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     total_shading_area=total_area,
                 )
 
-            out["F"] = objectives if not self.constrained_analysis else [objectives[0]]
+            # Set outputs directly with penalized TEDI
             if not self.constrained_analysis:
+                out["F"] = [tedi_with_penalty, overheating]
                 return
-            out["G"] = [lr - 110, br - 32, total_area - 110]
+            out["F"] = [tedi_with_penalty]
+            out["G"] = [lr - 110, br - 32]
+            return
             
         except Exception as _:
             out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
             if not self.constrained_analysis:
                 return
-            out["G"] = [1000.0, 1000.0, 1000.0]
+            out["G"] = [1000.0, 1000.0]
 
 def create_runner(num_workers: int) -> Tuple[StarmapParallelization, Optional[object]]:
     if num_workers > 1:
