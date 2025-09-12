@@ -500,7 +500,7 @@ def _create_overhang(
     # Create the shading object
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
     shading.Name = f"{orientation.capitalize()} Overhang {fenestration.Name}"
-    shading.Transmittance_Schedule_Name = "South Overhang Shading Schedule"
+    shading.Transmittance_Schedule_Name = "South Fin Shading Schedule"
     shading.Number_of_Vertices = 4
     
     # Set vertices with proper counter-clockwise ordering
@@ -616,7 +616,7 @@ def _create_fin(
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
     side = 'Left' if left_depth > 0 else 'Right'
     shading.Name = f"{orientation.capitalize()} Fin {fenestration.Name} {side}"
-    shading.Transmittance_Schedule_Name = "South Overhang Shading Schedule"
+    shading.Transmittance_Schedule_Name = "South Fin Shading Schedule"
     shading.Number_of_Vertices = len(vertices)
     
     # Set vertices with proper counter-clockwise ordering

@@ -1746,37 +1746,37 @@ Schedule:Compact,
     Through: 21 Mar,         !- Field 1
     For: AllDays,            !- Field 2
     Until: 06:00,            !- Field 3
-    0,                       !- Field 4
+     1,                      !- Field 4
     Until: 08:00,            !- Field 5
-    0,                       !- Field 6
+     1,                      !- Field 6
     Until: 10:00,            !- Field 7
-    1,                       !- Field 8
+     1,                      !- Field 8
     Until: 12:00,            !- Field 9
-    1,                       !- Field 10
+     1,                      !- Field 10
     Until: 14:00,            !- Field 11
-    0,                       !- Field 12
+     1,                      !- Field 12
     Until: 16:00,            !- Field 13
-    1,                       !- Field 14
+     1,                      !- Field 14
     Until: 18:00,            !- Field 15
-    0,                       !- Field 16
+     1,                      !- Field 16
     Until: 24:00,            !- Field 17
-    0,                       !- Field 18
+     1,                      !- Field 18
     Through: 21 Jun,         !- Field 19
     For: AllDays,            !- Field 20
     Until: 06:00,            !- Field 21
     0,                       !- Field 22
     Until: 08:00,            !- Field 23
-    1,                       !- Field 24
+     0,                      !- Field 24
     Until: 10:00,            !- Field 25
     0,                       !- Field 26
     Until: 12:00,            !- Field 27
     0,                       !- Field 28
     Until: 14:00,            !- Field 29
-    1,                       !- Field 30
+     0,                      !- Field 30
     Until: 16:00,            !- Field 31
     0,                       !- Field 32
     Until: 18:00,            !- Field 33
-    1,                       !- Field 34
+     0,                      !- Field 34
     Until: 24:00,            !- Field 35
     0,                       !- Field 36
     Through: 21 Sep,         !- Field 37
@@ -1788,51 +1788,51 @@ Schedule:Compact,
     Until: 10:00,            !- Field 43
     0,                       !- Field 44
     Until: 12:00,            !- Field 45
-    1,                       !- Field 46
+     0,                      !- Field 46
     Until: 14:00,            !- Field 47
-    1,                       !- Field 48
+     0,                      !- Field 48
     Until: 16:00,            !- Field 49
     0,                       !- Field 50
     Until: 18:00,            !- Field 51
-    1,                       !- Field 52
+     0,                      !- Field 52
     Until: 24:00,            !- Field 53
     0,                       !- Field 54
     Through: 21 Dec,         !- Field 55
     For: AllDays,            !- Field 56
     Until: 06:00,            !- Field 57
-    0,                       !- Field 58
+     0,                      !- Field 58
     Until: 08:00,            !- Field 59
-    1,                       !- Field 60
+     0,                      !- Field 60
     Until: 10:00,            !- Field 61
-    1,                       !- Field 62
+     0,                      !- Field 62
     Until: 12:00,            !- Field 63
-    0,                       !- Field 64
+     0,                      !- Field 64
     Until: 14:00,            !- Field 65
-    0,                       !- Field 66
+     0,                      !- Field 66
     Until: 16:00,            !- Field 67
-    0,                       !- Field 68
+     0,                      !- Field 68
     Until: 18:00,            !- Field 69
-    0,                       !- Field 70
+     0,                      !- Field 70
     Until: 24:00,            !- Field 71
-    0,                       !- Field 72
+     0,                      !- Field 72
     Through: 31 Dec,         !- Field 73
     For: AllDays,            !- Field 74
     Until: 06:00,            !- Field 75
-    0,                       !- Field 76
+     0,                      !- Field 76
     Until: 08:00,            !- Field 77
-    0,                       !- Field 78
+     0,                      !- Field 78
     Until: 10:00,            !- Field 79
-    1,                       !- Field 80
+     0,                      !- Field 80
     Until: 12:00,            !- Field 81
-    1,                       !- Field 82
+     0,                      !- Field 82
     Until: 14:00,            !- Field 83
-    0,                       !- Field 84
+     0,                      !- Field 84
     Until: 16:00,            !- Field 85
-    1,                       !- Field 86
+     0,                      !- Field 86
     Until: 18:00,            !- Field 87
-    0,                       !- Field 88
+     0,                      !- Field 88
     Until: 24:00,            !- Field 89
-    0;                       !- Field 90
+     0;                      !- Field 90
 
 Schedule:Compact,
     West Overhang Shading Schedule,  !- Name
@@ -8441,7 +8441,7 @@ FenestrationSurface:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW:BR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     38.7773900724,           !- Vertex 1 Y-coordinate {m}
@@ -8458,7 +8458,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW:LR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     43.397271281,            !- Vertex 1 Y-coordinate {m}
@@ -8475,7 +8475,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW1:BR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     38.743500642,            !- Vertex 1 Y-coordinate {m}
@@ -8492,7 +8492,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW1:LR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     43.3522652447,           !- Vertex 1 Y-coordinate {m}
@@ -8509,7 +8509,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW2:BR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     38.743500642,            !- Vertex 1 Y-coordinate {m}
@@ -8526,7 +8526,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW2:LR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     43.3522652447,           !- Vertex 1 Y-coordinate {m}
@@ -8543,7 +8543,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW3:BR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     38.743500642,            !- Vertex 1 Y-coordinate {m}
@@ -8560,7 +8560,7 @@ Shading:Building:Detailed,
 
 Shading:Building:Detailed,
     West Overhang SW3:LR_Wall_4_0_0_0_0_0_Win,  !- Name
-    On,                      !- Transmittance Schedule Name
+    Off,                     !- Transmittance Schedule Name
     4,                       !- Number of Vertices
     5.0584868402,            !- Vertex 1 X-coordinate {m}
     43.3522652447,           !- Vertex 1 Y-coordinate {m}
