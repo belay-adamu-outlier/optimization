@@ -12,10 +12,10 @@ SHADING_VARIABLE_KEYS = [
     'south_overhang_angle',
     'south_left_fin_depth',
     'south_right_fin_depth',
-    'west_overhang_depth',
-    'west_overhang_width',
-    'west_overhang_angle',
-    'west_right_fin_depth',
+    # 'west_overhang_depth',
+    # 'west_overhang_width',
+    # 'west_overhang_angle',
+    # 'west_right_fin_depth',
 ]
 
 
@@ -28,10 +28,10 @@ SHADING_VARIABLE_BOUNDS = {
     'south_overhang_angle': {'min': 0.0, 'max': 37.0},
     'south_left_fin_depth': {'min': 0.0, 'max': 5.0},
     'south_right_fin_depth': {'min': 0.0, 'max': 5.0},
-    'west_overhang_depth': {'min': 0.0, 'max': 2.0},
-    'west_overhang_width': {'min': 0.0, 'max': 2.0},
-    'west_overhang_angle': {'min': 0.0, 'max': 37.0},
-    'west_right_fin_depth': {'min': 0.0, 'max': 3.0},
+    # 'west_overhang_depth': {'min': 0.0, 'max': 2.0},
+    # 'west_overhang_width': {'min': 0.0, 'max': 2.0},
+    # 'west_overhang_angle': {'min': 0.0, 'max': 37.0},
+    # 'west_right_fin_depth': {'min': 0.0, 'max': 3.0},
 }
 
 
@@ -42,10 +42,10 @@ SHADING_PENALTY_WEIGHTS = {
     'south_overhang_angle': 3.0,
     'south_left_fin_depth': 1.0,
     'south_right_fin_depth': 1.0,
-    'west_overhang_depth': 1.0,
-    'west_overhang_width': 1.0,
-    'west_overhang_angle': 1.0,
-    'west_right_fin_depth': 1.0,
+    # 'west_overhang_depth': 1.0,
+    # 'west_overhang_width': 1.0,
+    # 'west_overhang_angle': 1.0,
+    # 'west_right_fin_depth': 1.0,
 }
 
 
