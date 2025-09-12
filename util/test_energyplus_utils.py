@@ -1462,13 +1462,30 @@ class TestCreateShadingElementsByOrientation:
         }
     
     def test_create_shading_elements_by_orientation(self):
-        """Test creating shading elements for different orientations."""
-        result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
-        
+        """Creates overhangs and fins per orientation with new params schema."""
+        # Update dimensions to new schema (depth/width/angle for overhang, depth for fins)
+        dims = {
+            'south': {
+                'overhang': {'depth': 0.5, 'width': 0.8, 'angle': 15.0},
+                'right_fin': {'depth': 0.3},
+                'left_fin': {'depth': 0.3},
+            },
+            'east': {
+                'overhang': {'depth': 0.4, 'width': 0.7, 'angle': 10.0},
+                'left_fin': {'depth': 0.2},
+            },
+            'west': {
+                'overhang': {'depth': 0.4, 'width': 0.6, 'angle': 20.0},
+                'right_fin': {'depth': 0.2},
+            },
+        }
+
+        result = create_shading_elements_by_orientation(self.mock_idf, dims)
+
         # Verify new shading elements were created
-        # South: 1 overhang + 1 fin, East: 1 overhang + 1 fin, West: 1 overhang + 1 fin
-        assert self.mock_idf.newidfobject.call_count == 6
-        
+        # South: 1 overhang + 2 fins, East: 1 overhang + 1 fin, West: 1 overhang + 1 fin -> 7 total
+        assert self.mock_idf.newidfobject.call_count == 7
+
         # Verify IDF object is returned
         assert result == self.mock_idf
     
@@ -1476,11 +1493,11 @@ class TestCreateShadingElementsByOrientation:
         """Test creating shading elements when some dimensions are missing."""
         incomplete_dimensions = {
             'south': {
-                'overhang': {'length': 0.5}
+                'overhang': {'depth': 0.5, 'width': 0.5, 'angle': 0.0}
                 # Missing right_fin and left_fin
             },
             'east': {
-                'overhang': {'length': 0.4}
+                'overhang': {'depth': 0.4, 'width': 0.6, 'angle': 0.0}
                 # Missing left_fin
             }
         }
@@ -1532,22 +1549,76 @@ class TestCreateShadingElementsByOrientation:
         """Test that the correct shading object types are created."""
         # Reset mock to track calls
         self.mock_idf.newidfobject.reset_mock()
-        
-        result = create_shading_elements_by_orientation(self.mock_idf, self.dimensions)
-        
+
+        dims = {
+            'south': {
+                'overhang': {'depth': 0.5, 'width': 0.8, 'angle': 15.0},
+                'right_fin': {'depth': 0.3},
+                'left_fin': {'depth': 0.3},
+            },
+            'east': {
+                'overhang': {'depth': 0.4, 'width': 0.7, 'angle': 10.0},
+                'left_fin': {'depth': 0.2},
+            },
+            'west': {
+                'overhang': {'depth': 0.4, 'width': 0.6, 'angle': 20.0},
+                'right_fin': {'depth': 0.2},
+            },
+        }
+
+        result = create_shading_elements_by_orientation(self.mock_idf, dims)
+
         # Verify that SHADING:BUILDING:DETAILED objects are created
         calls = self.mock_idf.newidfobject.call_args_list
-        
+
         # Check that we have the right number of SHADING:BUILDING:DETAILED objects
         shading_calls = [call for call in calls if call[0][0] == 'SHADING:BUILDING:DETAILED']
-        
-        assert len(shading_calls) == 6  # 3 overhangs + 3 fins
-        
+
+        assert len(shading_calls) == 7  # 3 overhangs + 4 fins
+
         # Verify the first call creates a SHADING:BUILDING:DETAILED object
         first_call = calls[0]
         assert first_call[0][0] == 'SHADING:BUILDING:DETAILED'
-        
+
         assert result == self.mock_idf
+
+    def test_create_shading_elements_vertices_and_schedules(self):
+        """Verify fin vertex count and schedule names reflect orientation/type."""
+        created = []
+
+        def factory(obj_type):
+            assert obj_type == 'SHADING:BUILDING:DETAILED'
+            s = type('Shade', (), {})()
+            created.append(s)
+            return s
+
+        self.mock_idf.newidfobject.side_effect = factory
+
+        # Angle large enough to create triangular fins for small depths
+        dims = {
+            'south': {
+                'overhang': {'depth': 0.6, 'width': 0.8, 'angle': 60.0},
+                'left_fin': {'depth': 1.0},
+                'right_fin': {'depth': 1.0},
+            }
+        }
+
+        create_shading_elements_by_orientation(self.mock_idf, dims)
+
+        # Expect 3 objects: overhang + 2 fins
+        assert len(created) == 3
+
+        # Check overhang schedule name is orientation-specific
+        overhang = created[0]
+        assert getattr(overhang, 'Transmittance_Schedule_Name') == 'South Overhang Shading Schedule'
+        assert getattr(overhang, 'Number_of_Vertices') == 4
+
+        # Check at least one fin becomes triangular (3 vertices) under high angle
+        fin_vertices = [getattr(obj, 'Number_of_Vertices', None) for obj in created[1:]]
+        assert any(v == 3 for v in fin_vertices)
+        # And fin schedule names are orientation-specific
+        fin_scheds = [getattr(obj, 'Transmittance_Schedule_Name', '') for obj in created[1:]]
+        assert all(s == 'South Fin Shading Schedule' for s in fin_scheds)
 
 
 class TestModifyIdf:

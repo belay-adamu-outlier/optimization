@@ -14,7 +14,7 @@ from eppy.modeleditor import IDF
 from .simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
 from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple, List, Optional, Any
 
 def _collect_vertices(surface, count: int = 4) -> Tuple[List[float], List[float], List[float]]:
     """Return lists of x, y, z from up to 4 vertices on a surface.
@@ -270,44 +270,70 @@ def rename_outside_walls_by_orientation(idf) -> Dict[str, str]:
         _rename_outdoor_walls(zone, east_and_west_surfaces, fenestrations, ['East', 'West'], max_x)        
     return idf
 
-def create_shading_elements_by_orientation(idf, dimensions):
-    """Create shading elements (overhangs, fins) based on fenestration geometry and orientation.
-    
-    Generates shading elements for different building orientations (south, east, west)
-    based on the provided dimensions. The function creates overhangs and fins
-    positioned relative to fenestrations, using SHADING:BUILDING:DETAILED objects
-    with proper counter-clockwise vertex ordering. Elements are only created if
-    their corresponding dimensions are provided.
+def cover_fenestrations_by_orientation(idf: IDF, orientation: List[str]):
+    """Cover fenestrations by shading elements by wall orientation.
     
     Args:
-        idf: The IDF object to add shading elements to
-        dimensions (dict): Dictionary containing shading dimensions for each orientation.
-            Expected structure:
-            {
-                'south': {
-                    'overhang': {'length': float},
-                    'right_fin': {'length': float},  # Optional
-                    'left_fin': {'length': float}    # Optional
-                },
-                'east': {
-                    'overhang': {'length': float},
-                    'left_fin': {'length': float}         # Optional
-                },
-                'west': {
-                    'overhang': {'length': float},
-                    'right_fin': {'length': float}         # Optional
-                }
-            }
+        idf: IDF object to mutate.
+        orientation: List of orientations to cover.
+    """
+    if len(orientation) == 0:
+        return idf
+    fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
+    
+    for fenestration in fenestrations:
+        for ori in orientation:
+            if ori not in fenestration.Building_Surface_Name.lower():
+                continue
             
+            # Create the shading object
+            shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
+            shading.Name = f"{ori.capitalize()} Overhang {fenestration.Name}"
+            shading.Transmittance_Schedule_Name = 'Off'
+            shading.Number_of_Vertices = 4
+                        
+            for i in range(1, 5):
+                x = fenestration[f'Vertex_{i}_Xcoordinate']
+                y = fenestration[f'Vertex_{i}_Ycoordinate']
+                z = fenestration[f'Vertex_{i}_Zcoordinate']
+                
+                setattr(shading, f'Vertex_{i}_Xcoordinate', x)
+                setattr(shading, f'Vertex_{i}_Ycoordinate', y)
+                setattr(shading, f'Vertex_{i}_Zcoordinate', z)
+    return idf
+
+def create_shading_elements_by_orientation(idf: IDF, dimensions: Optional[Dict[str, Any]]):
+    """Create shading elements (overhangs and fins) by wall orientation.
+
+    For each fenestration, creates SHADING:BUILDING:DETAILED objects for the
+    matching wall orientation(s). Supported orientations: 'south', 'west', 'east'.
+    Orientation is detected by substring match against the fenestration's
+    ``Building_Surface_Name`` (e.g., 'South:ZoneA').
+
+    Input dimensions are per-orientation dictionaries. All keys are optional;
+    missing items are skipped gracefully.
+
+    Expected structure (per orientation key):
+    - 'overhang': {'depth': float, 'width': float, 'angle': float}
+        - depth: projection distance from wall [m]
+        - width: relative factor for horizontal coverage across the window [0..]
+        - angle: tilt angle from horizontal [deg]
+    - 'left_fin': {'depth': float}  # fin on left jamb when viewed from outside
+    - 'right_fin': {'depth': float} # fin on right jamb when viewed from outside
+
+    Args:
+        idf: IDF object to mutate.
+        dimensions: Mapping of orientation -> parameters as described above.
+
     Returns:
-        IDF: The modified IDF object with new shading elements
-        
-    Note:
-        - Only fenestrations with orientation names in their Building_Surface_Name
-          will receive shading elements
-        - Shading elements are created as SHADING:BUILDING:DETAILED objects
-        - The function handles missing dimensions gracefully by skipping those elements
-        - Vertices are ordered counter-clockwise when viewed from outside the building
+        IDF: Same object, with added shading elements when requested.
+
+    Notes:
+    - Vertices are ordered counter-clockwise as seen from outside the building.
+    - Only fenestrations whose ``Building_Surface_Name`` contains an orientation
+      substring will receive elements.
+    - Initial transmittance schedule names are assigned; you may override them
+      later via ``assign_shading_transmittance_schedules``.
     """
     fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
     walls = idf.idfobjects.get('BUILDINGSURFACE:DETAILED', [])
@@ -332,7 +358,7 @@ def create_shading_elements_by_orientation(idf, dimensions):
             continue
             
         # Create shading elements
-        orientations = ['south', 'west']
+        orientations = ['south', 'west', 'east']
         
         for orientation in orientations:
     
@@ -370,8 +396,11 @@ def create_shading_elements_by_orientation(idf, dimensions):
     return idf
 
 
-def _get_fenestration_vertices(fenestration):
-    """Extract fenestration vertices as a list of (x, y, z) tuples."""
+def _get_fenestration_vertices(fenestration: Any) -> Optional[List[Tuple[float, float, float]]]:
+    """Extract fenestration vertices as a list of (x, y, z) tuples.
+
+    Returns None if fewer than 3 valid vertices are available.
+    """
     vertices = []
     for i in range(1, 5):  # EnergyPlus uses 1-based indexing
         try:
@@ -386,27 +415,41 @@ def _get_fenestration_vertices(fenestration):
     return vertices if len(vertices) >= 3 else None
 
 
+def _overhang_width_diff(ori: str, span_x: float, span_y: float, rel_width: float) -> float:
+    """Compute width extension based on window width (span).
+
+    Uses the window span for the orientation's lateral axis and scales by
+    `rel_width` to determine the desired overhang width across the window.
+
+    width_diff = (window_span * rel_width) - window_span
+    where window_span is along X for south and along Y for west/east.
+    """
+    window_span = span_x if ori == 'south' else span_y
+    return window_span * rel_width - window_span
+
+
 def _create_overhang(
-    idf, 
-    fenestration, 
-    fen_vertices, 
-    params, 
-    orientation,
-    wall
-):
-    """Create an overhang shading element with proper counter-clockwise vertex ordering."""
+    idf: IDF,
+    fenestration: Any,
+    fen_vertices: List[Tuple[float, float, float]],
+    params: Dict[str, float],
+    orientation: str,
+    wall: Any,
+) -> None:
+    """Create an overhang shading element.
+
+    Args:
+        idf: IDF object.
+        fenestration: Fenestration IDF object.
+        fen_vertices: Fenestration vertices as (x, y, z).
+        params: Dict with keys 'depth', 'width', 'angle'.
+        orientation: 'south' | 'west' | 'east'.
+        wall: Parent wall object for span/width reference.
+    """
     if not fen_vertices or len(fen_vertices) < 3:
         return
 
     depth, width, angle = params['depth'], params['width'], params['angle']
-    wall_width = 0
-    
-    if orientation == 'south':
-        wall_width = wall.Vertex_2_Xcoordinate - wall.Vertex_1_Xcoordinate
-    elif orientation == 'west':
-        wall_width = wall.Vertex_1_Ycoordinate - wall.Vertex_2_Ycoordinate
-    elif orientation == 'east':
-        wall_width = wall.Vertex_2_Ycoordinate - wall.Vertex_1_Ycoordinate
     
     # Calculate overhang geometry
     # Overhang extends outward from the building (negative Z direction for most orientations)
@@ -421,11 +464,14 @@ def _create_overhang(
     min_y, max_y = min(ys), max(ys)
     _, max_z = min(zs), max(zs)
     min_z = max_z - math.tan(angle * math.pi / 180) * depth
+
+    # Compute overhang lateral width once based on window span
+    width_diff = _overhang_width_diff(orientation, max_x - min_x, max_y - min_y, width)
+
     # Create overhang vertices (counter-clockwise when viewed from outside)
     # Extend outward from the building surface
     if orientation == 'south':
         # South overhang extends north (negative Y)
-        width_diff = wall_width * width - (max_x - min_x)
         vertices = [
             (min_x - width_diff/2, max_y - depth, min_z),     # Vertex 1: bottom-left
             (max_x + width_diff/2, max_y - depth, min_z),     # Vertex 2: bottom-right
@@ -434,7 +480,6 @@ def _create_overhang(
         ]
     elif orientation == 'west':
         # West overhang extends west (negative X)
-        width_diff = wall_width * width - (max_y - min_y)
         vertices = [
             (min_x, min_y - width_diff/2, min_z),             # Vertex 1: bottom-left
             (min_x, max_y + width_diff/2, min_z),             # Vertex 2: bottom-right
@@ -443,7 +488,6 @@ def _create_overhang(
         ]
     elif orientation == 'east':
         # East overhang extends east (positive X)
-        width_diff = wall_width * width - (max_y - min_y)
         vertices = [
             (max_x + depth, min_y - width_diff/2, min_z),     # Vertex 1: bottom-left
             (max_x + depth, max_y + width_diff/2, min_z),     # Vertex 2: bottom-right
@@ -455,8 +499,8 @@ def _create_overhang(
     
     # Create the shading object
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
-    shading.Name = f'{orientation.capitalize()} Overhang {fenestration.Name}'
-    shading.Transmittance_Schedule_Name = 'South Overhang Shading Schedule'
+    shading.Name = f"{orientation.capitalize()} Overhang {fenestration.Name}"
+    shading.Transmittance_Schedule_Name = "South Overhang Shading Schedule"
     shading.Number_of_Vertices = 4
     
     # Set vertices with proper counter-clockwise ordering
@@ -467,15 +511,25 @@ def _create_overhang(
 
 
 def _create_fin(
-    idf, 
-    fenestration, 
-    fen_vertices, 
-    left_depth, 
-    right_depth, 
-    orientation,
-    overhang_angle = 0
-):
-    """Create a fin shading element with proper counter-clockwise vertex ordering."""
+    idf: IDF,
+    fenestration: Any,
+    fen_vertices: List[Tuple[float, float, float]],
+    left_depth: float,
+    right_depth: float,
+    orientation: str,
+    overhang_angle: float = 0,
+) -> None:
+    """Create a vertical fin shading element.
+
+    Args:
+        idf: IDF object.
+        fenestration: Fenestration IDF object.
+        fen_vertices: Fenestration vertices as (x, y, z).
+        left_depth: Depth [m] for left-side fin (0 to skip).
+        right_depth: Depth [m] for right-side fin (0 to skip).
+        orientation: 'south' | 'west' | 'east'.
+        overhang_angle: Overhang tilt angle [deg] to align fin top.
+    """
     if not fen_vertices or len(fen_vertices) < 3:
         return
     # Calculate fin geometry
@@ -498,7 +552,7 @@ def _create_fin(
     new_depth = 1.5 * math.cos(overhang_angle * math.pi / 180) if has_three_vertices else fin_depth
     # Create fin vertices (counter-clockwise when viewed from outside)
     if orientation == 'south' and left_depth > 0:
-        # South fin extends sourth from left of fenestration (negative Y direction) as seen from east side of building
+        # South fin extends south from left of fenestration (negative Y) as seen from east side of building
         vertices = [
             (min_x, min_y - new_depth, min_z),      # Vertex 1: bottom-left
             (min_x, min_y, min_z),                  # Vertex 2: bottom-right
@@ -512,7 +566,7 @@ def _create_fin(
                 max_z - math.tan(overhang_angle * math.pi / 180) * new_depth
             ))  # Vertex 4: top-left
     elif orientation == 'south' and right_depth > 0:
-        # South fin extends south from right of fenestration (negative Y direction) as seen from east side of building
+        # South fin extends south from right of fenestration (negative Y) as seen from east side of building
         vertices = [
             (max_x, min_y - new_depth, min_z),      # Vertex 1: bottom-left
             (max_x, min_y, min_z),                  # Vertex 2: bottom-right
@@ -527,7 +581,7 @@ def _create_fin(
             )) # Vertex 4: top-left
 
     elif orientation == 'west':
-        # West fin extends west (negative X direction) as seen from north side of building
+        # West fin extends west (negative X) as seen from north side of building
         vertices = [
             (min_x, min_y, max_z),                  # Vertex 1: top-left
             (min_x, min_y , min_z),                 # Vertex 2: bottom-left
@@ -542,7 +596,7 @@ def _create_fin(
             )) # Vertex 4: top-right
 
     elif orientation == 'east':
-        # East fin extends east (positive X direction)
+        # East fin extends east (positive X)
         vertices = [
             (max_x + new_depth, min_y, min_z),      # Vertex 1: bottom-left
             (max_x, max_y, min_z),                  # Vertex 2: bottom-right
@@ -560,8 +614,9 @@ def _create_fin(
     
     # Create the shading object
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
-    shading.Name = f'{orientation.capitalize()} Fin {fenestration.Name} {'Left' if left_depth > 0 else 'Right'}'
-    shading.Transmittance_Schedule_Name = 'South Overhang Shading Schedule'
+    side = 'Left' if left_depth > 0 else 'Right'
+    shading.Name = f"{orientation.capitalize()} Fin {fenestration.Name} {side}"
+    shading.Transmittance_Schedule_Name = "South Overhang Shading Schedule"
     shading.Number_of_Vertices = len(vertices)
     
     # Set vertices with proper counter-clockwise ordering
