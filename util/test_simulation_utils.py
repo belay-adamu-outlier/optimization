@@ -25,8 +25,10 @@ from .simulation_utils import (
     get_from_cache,
     get_cache_entry,
     get_generation_from_cache,
-    save_cache_to_file
+    save_cache_to_file,
+    compute_shading_penalty,
 )
+from constants.shading_variables import SHADING_VARIABLE_BOUNDS
 
 
 class TestTemperatureExtraction(unittest.TestCase):
@@ -435,6 +437,44 @@ class TestSharedCacheFunctions(unittest.TestCase):
             mock_print.assert_called_once()
             call_args = mock_print.call_args[0][0]
             self.assertIn("Warning: Could not save debug cache file", call_args)
+
+
+class TestPenaltyFunction(unittest.TestCase):
+    """Tests for the shading penalty objective function."""
+
+    def test_penalty_zero_when_all_zero(self):
+        params = {k: 0.0 for k in SHADING_VARIABLE_BOUNDS.keys()}
+        penalty = compute_shading_penalty(
+            params, SHADING_VARIABLE_BOUNDS, 'shading'
+        )
+        self.assertAlmostEqual(penalty, 0.0, places=8)
+
+    def test_penalty_quadratic_normalized(self):
+        # Use half of max for three variables -> each contributes (0.5)^2/(1)^2
+        # since normalization divides by max^2, the term is (v/max)^2.
+        params = {
+            'south_overhang_depth': SHADING_VARIABLE_BOUNDS[
+                'south_overhang_depth'
+            ]['max'] * 0.5,
+            'south_overhang_angle': SHADING_VARIABLE_BOUNDS[
+                'south_overhang_angle'
+            ]['max'] * 0.5,
+            'west_right_fin_depth': SHADING_VARIABLE_BOUNDS[
+                'west_right_fin_depth'
+            ]['max'] * 0.5,
+        }
+        expected = 3 * (0.5 ** 2)
+        penalty = compute_shading_penalty(
+            params, SHADING_VARIABLE_BOUNDS, 'shading'
+        )
+        self.assertAlmostEqual(penalty, expected, places=8)
+
+    def test_penalty_ignores_negative_values(self):
+        params = {'south_left_fin_depth': -1.0}
+        penalty = compute_shading_penalty(
+            params, SHADING_VARIABLE_BOUNDS, 'shading'
+        )
+        self.assertAlmostEqual(penalty, 0.0, places=8)
 
 
 if __name__ == '__main__':

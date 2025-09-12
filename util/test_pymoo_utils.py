@@ -14,6 +14,7 @@ from .pymoo_utils import (
     get_problem_constraints,
     get_params,
 )
+from constants.shading_variables import SHADING_VARIABLE_BOUNDS
 
 
 def test_initialize_envelope_optimization_variables_structure():
@@ -43,6 +44,8 @@ def test_initialize_shading_optimization_variables_structure():
         assert k in vars
         assert 'min' in vars[k] and 'max' in vars[k]
         assert vars[k]['min'] <= vars[k]['max']
+    # Verify constants are the source of truth
+    assert vars == SHADING_VARIABLE_BOUNDS
 
 
 @pytest.mark.parametrize('opt_type, key', [

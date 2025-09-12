@@ -6,49 +6,61 @@ import numpy as np
 import re
 import json
 from multiprocessing import Manager
+from constants.shading_variables import (
+    SHADING_VARIABLE_KEYS,
+    SHADING_VARIABLE_BOUNDS,
+    SHADING_PENALTY_WEIGHTS,
+)
 
 
-def compute_shading_penalty(params: dict, optimization_variables: dict, optimization_type: str) -> float:
-    """Compute a TEDI penalty from shading decision variables without using derived areas.
+def compute_shading_penalty(
+    params: dict, 
+    optimization_variables: dict, 
+    optimization_type: str
+) -> float:
+    """Compute a soft penalty for shading variables using an objective penalty.
 
-    Normalizes selected shading variables by their configured maxima and
-    scales the average to TEDI space. Only applies for optimization_type == 'shading'.
+    Implements f0(x) = sum_j lambda_j * Q( g_j(x) ) where
+    g_j(x) = f_j(x) - M with constraint 0 (feasible at 0). For our case we
+    penalize positive magnitude of selected shading variables using
+    Q(t) = max{t, 0}^2. This produces a smooth, increasing penalty when the
+    variable value exceeds the 0 constraint and is 0 when at the constraint.
 
     Args:
-        params: Parameter dict for the candidate (from cache or fresh eval).
-        optimization_variables: Variable bounds dict used by the optimizer.
-        optimization_type: 'shading' or other.
+        params: Candidate parameter dict.
+        optimization_variables: Bounds dict (used for normalization fallback).
+        optimization_type: Only 'shading' triggers penalties.
 
     Returns:
-        Penalty value to add to TEDI.
+        float: Penalty to add to TEDI.
     """
     try:
         if optimization_type != 'shading' or not isinstance(params, dict):
             return 0.0
 
-        keys = [
-            'south_overhang_depth',
-            'south_overhang_angle',
-            'south_left_fin_depth',
-            'south_right_fin_depth',
-            'west_overhang_depth',
-            'west_overhang_angle',
-            'west_right_fin_depth',
-        ]
-        vals = []
-        for k in keys:
-            if k in params:
-                v = float(params[k])
-                bounds = optimization_variables.get(k, {}) if isinstance(optimization_variables, dict) else {}
-                max_v = bounds.get('max') if isinstance(bounds, dict) else None
-                if max_v is None or max_v == 0:
-                    max_v = 60.0 if 'angle' in k else 5.0
-                vals.append(max(0.0, v) / float(max_v))
-        if not vals:
-            return 0.0
-        avg_norm = sum(vals) / len(vals)
-        penalty_scale = 4.0
-        return penalty_scale * avg_norm
+        penalty_sum = 0.0
+        weight_sum = 0.0
+        for key in SHADING_VARIABLE_KEYS:
+            if key not in params:
+                continue
+            value = float(params.get(key, 0.0))
+            # Constraint M = 0 for all variables
+            t = max(value - 0.0, 0.0)
+            q_t = t * t
+            weight = float(SHADING_PENALTY_WEIGHTS.get(key, 1.0))
+            # Optional normalization by max bound to keep scale moderate
+            bounds = (
+                (optimization_variables or {}).get(key)
+                or SHADING_VARIABLE_BOUNDS.get(key)
+                or {}
+            )
+            max_v = bounds.get('max', None)
+            if max_v and max_v > 0:
+                q_t = q_t / (float(max_v) ** 2)
+            penalty_sum += weight * q_t
+            weight_sum += weight
+
+        return float(penalty_sum / weight_sum)
     except Exception:
         return 0.0
 
@@ -183,7 +195,7 @@ def parse_eso_file(eso_file_path: str) -> Tuple[Dict[str, List[float]], List[dat
     # First pass: find variable definitions and build mapping
     for line in lines:
         line = line.strip()
-        if not line or not ',' in line:
+        if not line or ',' not in line:
             continue
         parts = line.split(',')
         if len(parts) < 4:

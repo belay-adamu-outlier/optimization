@@ -8,6 +8,7 @@ based on the chosen optimization type (envelope or shading).
 
 
 
+from constants.shading_variables import SHADING_VARIABLE_BOUNDS
 def initialize_envelope_optimization_variables():
     """Initialize optimization variables for building envelope optimization.
     
@@ -25,25 +26,6 @@ def initialize_envelope_optimization_variables():
     }
 
 
-def initialize_shading_optimization_variables():
-    """Initialize optimization variables for shading geometry optimization.
-    
-    Returns:
-        dict: Dictionary of shading optimization variables with continuous bounds
-    """
-    return {
-        'south_overhang_depth': {'min': 0.0, 'max': 3.0},
-        'south_overhang_width': {'min': 0.0, 'max': 2.0},
-        'south_overhang_angle': {'min': 0.0, 'max': 60.0},
-        'south_left_fin_depth': {'min': 0.0, 'max': 3.0},
-        'south_right_fin_depth': {'min': 0.0, 'max': 3.0},
-        # 'west_overhang_depth': {'min': 0.0, 'max': 5.0},
-        # 'west_overhang_width': {'min': 0.0, 'max': 1.0},
-        # 'west_overhang_angle': {'min': 0.0, 'max': 60.0},
-        # 'west_right_fin_depth': {'min': 0.0, 'max': 5.0}
-    }
-
-
 def get_optimization_variables(optimization_type):
     """Get optimization variables based on the chosen optimization type.
     
@@ -54,7 +36,7 @@ def get_optimization_variables(optimization_type):
         dict: Dictionary of optimization variables and their options
     """
     if optimization_type.lower() == 'shading':
-        return initialize_shading_optimization_variables()
+        return dict(SHADING_VARIABLE_BOUNDS)
     else:
         return initialize_envelope_optimization_variables()
 
