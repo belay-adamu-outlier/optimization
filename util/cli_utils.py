@@ -1,4 +1,4 @@
-"""
+﻿"""
 CLI Utilities for Building Envelope Optimization
 
 This module handles all command-line interface logic including:
@@ -8,6 +8,7 @@ This module handles all command-line interface logic including:
 """
 
 import sys
+import os
 
 
 def get_interactive_arguments():
@@ -157,28 +158,63 @@ def _get_optimization_type_choice():
 
 
 def _get_weather_file_choice():
-    """Get weather file choice from user."""
-    print("Weather file options:")
-    print("1. Vancouver - 2021 AMY.epw (default)")
-    print("2. CAN_BC_Vancouver.718920_CWEC.epw")
-    print("3. Enter custom path")
-    
-    choice = input("Enter choice (1-3) or press Enter for default value of 1: ").strip()
-    
-    if choice == "1" or choice == "":
-        return "Vancouver - 2021 AMY.epw"
-    elif choice == "2":
-        return "CAN_BC_Vancouver.718920_CWEC.epw"
-    elif choice == "3":
+    """Get weather file choice from the BEMs folder."""
+    # Resolve BEMs directory relative to this file's parent directory
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    bems_dir = os.path.join(project_root, "BEMs")
+
+    # Find .epw files (non-recursive)
+    epw_files = []
+    try:
+        if os.path.isdir(bems_dir):
+            for name in os.listdir(bems_dir):
+                if name.lower().endswith(".epw"):
+                    epw_files.append(name)
+    except Exception:
+        epw_files = []
+
+    print("Weather file options (from BEMs):")
+    if not epw_files:
+        print("No .epw files found in BEMs.")
+        print("1. Enter custom path")
+        input("Enter choice (1) or press Enter to enter custom path: ")
         custom_path = input("Enter weather file path: ").strip()
         if not custom_path:
-            print("Invalid path, using default: Vancouver - 2021 AMY.epw")
-            return "Vancouver - 2021 AMY.epw"
+            print("No weather file provided. Please add a .epw to BEMs or enter a valid path.")
+            return None
         return custom_path
-    else:
-        print("Invalid choice, using default: Vancouver - 2021 AMY.epw")
-        return "Vancouver - 2021 AMY.epw"
 
+    epw_files.sort()
+    
+    for idx, fname in enumerate(epw_files, start=1):
+        label = " (default)" if idx == 1 else ""
+        print(f"{idx}. {fname}{label}")
+    custom_idx = len(epw_files) + 1
+    
+    print(f"{custom_idx}. Enter custom path")
+
+    prompt = f"Enter choice (1-{custom_idx}) or press Enter for default value of 1: "
+    choice = input(prompt).strip()
+
+    if choice == "" or choice == "1":
+        return os.path.join("BEMs", epw_files[0])
+
+    if choice == str(custom_idx):
+        custom_path = input("Enter weather file path: ").strip()
+        if not custom_path:
+            print(f"Invalid path, using default: {epw_files[0]}")
+            return os.path.join("BEMs", epw_files[0])
+        return custom_path
+
+    try:
+        idx = int(choice)
+        if 1 <= idx <= len(epw_files):
+            return os.path.join("BEMs", epw_files[idx - 1])
+        else:
+            raise ValueError()
+    except (ValueError, TypeError):
+        print(f"Invalid choice, using default: {epw_files[0]}")
+        return os.path.join("BEMs", epw_files[0])
 
 def _get_overheating_criterion_choice():
     """Get overheating criterion choice from user."""
@@ -314,3 +350,6 @@ def print_optimization_footer():
     print("=" * 80)
     print("OPTIMIZATION COMPLETE")
     print("=" * 80) 
+
+
+
