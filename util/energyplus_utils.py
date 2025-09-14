@@ -1106,7 +1106,8 @@ def modify_idf(idf, parameters, save=False, save_path=None):
     # Create shading elements if provided as nested dimensions
     shading_dimensions = parameters.get('shading_dimensions')
     if shading_dimensions:
-        idf = create_shading_elements_by_orientation(idf, shading_dimensions)
+        # idf = create_shading_elements_by_orientation(idf, shading_dimensions)
+        idf = create_shading_overhangs_and_fins_by_orientation(idf, shading_dimensions)
 
     # Save the modified IDF file if requested
     if save:
@@ -1700,3 +1701,193 @@ def _calculate_polygon_area(vertices):
         area -= coords[j][0] * coords[i][1]
     
     return abs(area) / 2.0
+
+
+def _compute_overhang_extensions(
+    fen_vertices: List[Tuple[float, float, float]],
+    orientation: str,
+    params: Dict[str, Any],
+) -> Tuple[float, float]:
+    """Compute left/right overhang extensions in meters.
+
+    Priority:
+    1) Use explicit percentage fields 'left_extension_pct'/'right_extension_pct'
+       of the window span along the lateral axis for the orientation.
+    2) Fallback to explicit meter fields 'left_extension'/'right_extension' if present.
+    3) Fallback to legacy 'width' relative factor -> symmetric extra split.
+    """
+    xs = [v[0] for v in fen_vertices]
+    ys = [v[1] for v in fen_vertices]
+    span_x = (max(xs) - min(xs)) if xs else 0.0
+    span_y = (max(ys) - min(ys)) if ys else 0.0
+    window_span = span_x if orientation == 'south' else span_y
+
+    # 1) Percent-based
+    l_pct = params.get('left_extension_pct', None)
+    r_pct = params.get('right_extension_pct', None)
+
+    try:
+        l_pct_f = float(l_pct) if l_pct is not None else None
+    except (TypeError, ValueError):
+        l_pct_f = None
+
+    try:
+        r_pct_f = float(r_pct) if r_pct is not None else None
+    except (TypeError, ValueError):
+        r_pct_f = None
+
+    if l_pct_f is not None or r_pct_f is not None:
+        left = max(0.0, (l_pct_f or 0.0) * window_span)
+        right = max(0.0, (r_pct_f or 0.0) * window_span)
+        return left, right
+
+    # 2) Explicit meters
+    try:
+        left_ext = float(params.get('left_extension', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        left_ext = 0.0
+
+    try:
+        right_ext = float(params.get('right_extension', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        right_ext = 0.0
+
+    if left_ext > 0.0 or right_ext > 0.0:
+        return max(0.0, left_ext), max(0.0, right_ext)
+
+    # 3) Legacy width factor -> symmetric extra coverage
+    try:
+        rel_width = float(params.get('width', 1.0) or 1.0)
+    except (TypeError, ValueError):
+        rel_width = 1.0
+
+    extra = max(window_span * rel_width - window_span, 0.0)
+    half = 0.5 * extra
+    return half, half
+
+
+def _create_overhang_parametric(
+    idf: IDF,
+    fenestration: Any,
+    fen_vertices: List[Tuple[float, float, float]],
+    params: Dict[str, Any],
+    orientation: str,
+) -> None:
+    """Create a SHADING:OVERHANG object for a fenestration.
+
+    Supported params: depth, angle, height_above, left_extension, right_extension,
+    and legacy width.
+    """
+    if not params or 'depth' not in params:
+        return
+    depth = float(params.get('depth', 0.0) or 0.0)
+    angle = float(params.get('angle', 0.0) or 0.0)
+    height_above = float(params.get('height_above', 0.0) or 0.0)
+    left_ext, right_ext = _compute_overhang_extensions(fenestration and [(getattr(fenestration, f'Vertex_{i}_Xcoordinate', 0.0) or 0.0, getattr(fenestration, f'Vertex_{i}_Ycoordinate', 0.0) or 0.0, getattr(fenestration, f'Vertex_{i}_Zcoordinate', 0.0) or 0.0) for i in range(1,5)] or [], orientation, params)
+
+    ov = idf.newidfobject('SHADING:OVERHANG')
+    ov.Name = f"{orientation.capitalize()} Overhang {fenestration.Name}"
+    ov.Window_or_Door_Name = fenestration.Name
+    ov.Height_above_Window_or_Door = height_above
+    ov.Tilt_Angle_from_WindowDoor = angle
+    ov.Left_extension_from_WindowDoor_Width = left_ext
+    ov.Right_extension_from_WindowDoor_Width = right_ext
+    ov.Depth = depth
+
+
+def _create_fin_parametric(
+    idf: IDF,
+    fenestration: Any,
+    side_params: Dict[str, Any],
+    other_side_params: Dict[str, Any],
+    orientation: str,
+) -> None:
+    """Create a SHADING:FIN object for a fenestration.
+
+    Each side may specify: depth, extension, distance_above_top,
+    distance_below_bottom, tilt (all floats).
+    """
+    if not side_params and not other_side_params:
+        return
+
+    left_depth = float((side_params or {}).get('depth', 0.0) or 0.0)
+    right_depth = float((other_side_params or {}).get('depth', 0.0) or 0.0)
+    left_ext = float((side_params or {}).get('extension', 0.0) or 0.0)
+    right_ext = float((other_side_params or {}).get('extension', 0.0) or 0.0)
+    left_above = float((side_params or {}).get('distance_above_top', 0.0) or 0.0)
+    right_above = float((other_side_params or {}).get('distance_above_top', 0.0) or 0.0)
+    left_below = float((side_params or {}).get('distance_below_bottom', 0.0) or 0.0)
+    right_below = float((other_side_params or {}).get('distance_below_bottom', 0.0) or 0.0)
+    left_tilt = float((side_params or {}).get('tilt', 90.0) or 90.0)
+    right_tilt = float((other_side_params or {}).get('tilt', 90.0) or 90.0)
+
+    fin = idf.newidfobject('SHADING:FIN')
+    fin.Name = f"{orientation.capitalize()} Fin {fenestration.Name}"
+    fin.Window_or_Door_Name = fenestration.Name
+    
+    # Left side
+    fin.Left_Extension_from_WindowDoor = left_ext
+    fin.Left_Distance_Above_Top_of_Window = left_above
+    fin.Left_Distance_Below_Bottom_of_Window = left_below
+    fin.Left_Tilt_Angle_from_WindowDoor = left_tilt
+    fin.Left_Depth = left_depth
+    
+    # Right side
+    fin.Right_Extension_from_WindowDoor = right_ext
+    fin.Right_Distance_Above_Top_of_Window = right_above
+    fin.Right_Distance_Below_Bottom_of_Window = right_below
+    fin.Right_Tilt_Angle_from_WindowDoor = right_tilt
+    fin.Right_Depth = right_depth
+
+
+def create_shading_overhangs_and_fins_by_orientation(
+    idf: IDF, dimensions: Optional[Dict[str, Any]]
+):
+    """Create SHADING:OVERHANG and SHADING:FIN objects by wall orientation.
+
+    Accepts the same arguments as create_shading_elements_by_orientation.
+    """
+    if not dimensions:
+        return idf
+
+    fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
+    for fen in fenestrations:
+        wall_name_l = str(getattr(fen, 'Building_Surface_Name', '')).lower()
+        # Collect fenestration vertices from object
+        fen_vertices = []
+        for i in range(1,5):
+            x = getattr(fen, f'Vertex_{i}_Xcoordinate', None)
+            y = getattr(fen, f'Vertex_{i}_Ycoordinate', None)
+            z = getattr(fen, f'Vertex_{i}_Zcoordinate', None)
+            if x is not None and y is not None and z is not None:
+                fen_vertices.append((float(x), float(y), float(z)))
+        if not fen_vertices:
+            continue
+
+        for orientation in ['south', 'west', 'east']:
+            if orientation not in wall_name_l:
+                continue
+            side_dims = dimensions.get(orientation, {}) or {}
+
+            if isinstance(side_dims.get('overhang'), dict):
+                _create_overhang_parametric(
+                    idf,
+                    fen,
+                    fen_vertices,
+                    side_dims['overhang'],
+                    orientation,
+                )
+
+            left = side_dims.get('left_fin') if isinstance(side_dims.get('left_fin'), dict) else None
+            right = side_dims.get('right_fin') if isinstance(side_dims.get('right_fin'), dict) else None
+            
+            if left or right:
+                _create_fin_parametric(
+                    idf, 
+                    fen, 
+                    left or {}, 
+                    right or {}, 
+                    orientation
+                )
+
+    return idf

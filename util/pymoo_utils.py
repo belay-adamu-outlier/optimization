@@ -98,25 +98,33 @@ def get_params(optimization_type, x, optimization_variables):
         
         for side in ['south', 'west']:
             # Only create blocks for sides where variables were provided
-            has_overhang = (
-                f'{side}_overhang_depth' in params
-                and f'{side}_overhang_width' in params
-                and f'{side}_overhang_angle' in params
-            )
+            has_overhang = (f'{side}_overhang_depth' in params)
             if has_overhang:
                 ensure(side)
                 dims[side]['overhang'] = {
-                    'depth': params[f'{side}_overhang_depth'],
-                    'width': params[f'{side}_overhang_width'],
-                    'angle': params[f'{side}_overhang_angle'],
+                    'depth': params.get(f'{side}_overhang_depth'),
+                    'width': params.get(f'{side}_overhang_width'),
+                    'angle': params.get(f'{side}_overhang_angle'),
+                    'height_above': params.get(f'{side}_overhang_height_above'),
+                    # New: percentage of window width for left/right extensions
+                    'left_extension_pct': params.get(f'{side}_overhang_left_extension_pct'),
+                    'right_extension_pct': params.get(f'{side}_overhang_right_extension_pct'),
                 }
 
             if f'{side}_left_fin_depth' in params:
                 ensure(side)
                 dims[side]['left_fin'] = {'depth': params[f'{side}_left_fin_depth']}
+                if f'{side}_left_fin_extension' in params:
+                    dims[side]['left_fin']['extension'] = params[f'{side}_left_fin_extension']
+                if f'{side}_fin_tilt' in params:
+                    dims[side]['left_fin']['tilt'] = params[f'{side}_fin_tilt']
             if f'{side}_right_fin_depth' in params:
                 ensure(side)
                 dims[side]['right_fin'] = {'depth': params[f'{side}_right_fin_depth']}
+                if f'{side}_right_fin_extension' in params:
+                    dims[side]['right_fin']['extension'] = params[f'{side}_right_fin_extension']
+                if f'{side}_fin_tilt' in params:
+                    dims[side]['right_fin']['tilt'] = params[f'{side}_fin_tilt']
 
         if dims:
             params['shading_dimensions'] = dims
@@ -140,3 +148,8 @@ def get_params(optimization_type, x, optimization_variables):
         params['window'] = params['window_construction']
 
     return params
+
+
+
+
+
