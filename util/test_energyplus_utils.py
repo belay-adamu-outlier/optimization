@@ -23,6 +23,7 @@ from .energyplus_utils import (
     _expand_partial_schedule,
     build_seasonal_shading_schedules,
     calculate_total_shading_area,
+    bulk_copy_window_related_objects,
 )
 
 
@@ -1919,6 +1920,71 @@ class TestCalculateTotalShadingArea:
         total_area = calculate_total_shading_area(self.mock_idf)
         
         assert total_area == 0.0
+
+
+class TestCopyWindowConstructionsAndMaterials:
+    """Tests for copying window constructions and dependent materials."""
+
+    def setup_method(self):
+        self.src = Mock()
+        self.dst = Mock()
+        self.src.idfobjects = {
+            'FENESTRATIONSURFACE:DETAILED': [],
+            'CONSTRUCTION': [],
+            'WINDOWMATERIAL:GLAZING': [],
+            'WINDOWMATERIAL:GAS': [],
+        }
+        self.dst.idfobjects = {
+            'FENESTRATIONSURFACE:DETAILED': [],
+            'CONSTRUCTION': [],
+            'WINDOWMATERIAL:GLAZING': [],
+            'WINDOWMATERIAL:GAS': [],
+        }
+        # Provide API for new objects
+        created = []
+
+        def factory(key):
+            ns = SimpleNamespace()
+            ns.key = key
+            created.append(ns)
+            return ns
+
+        self.dst.newidfobject = Mock(side_effect=factory)
+        # Some eppy versions expose copyidfobject; simulate raising to use fallback
+        self.dst.copyidfobject = Mock(side_effect=Exception('no copy'))
+
+    def test_no_windows_returns_empty_mapping(self):
+        mapping = copy_window_constructions_and_materials(self.src, self.dst)
+        assert mapping == {}
+
+    def test_copies_construction_and_layers_with_suffix(self):
+        # Create a window that uses a construction
+        win = SimpleNamespace()
+        win.Construction_Name = 'WinCons1'
+        self.src.idfobjects['FENESTRATIONSURFACE:DETAILED'] = [win]
+
+        # Create construction with two layers
+        cons = SimpleNamespace()
+        cons.Name = 'WinCons1'
+        cons.Outside_Layer = 'Clear_6mm'
+        cons.Layer_2 = 'Air_12mm'
+        self.src.idfobjects['CONSTRUCTION'] = [cons]
+
+        # Create materials referenced by the construction
+        glz = SimpleNamespace()
+        glz.Name = 'Clear_6mm'
+        gas = SimpleNamespace()
+        gas.Name = 'Air_12mm'
+        self.src.idfobjects['WINDOWMATERIAL:GLAZING'] = [glz]
+        self.src.idfobjects['WINDOWMATERIAL:GAS'] = [gas]
+
+        mapping = copy_window_constructions_and_materials(self.src, self.dst, suffix='__T')
+
+        # Verify mapping and that destination has new objects via newidfobject calls
+        assert mapping == {'WinCons1': 'WinCons1__T'}
+
+        # The fallback path uses newidfobject and sets attributes; ensure it was invoked
+        assert self.dst.newidfobject.call_count >= 3
     
     def test_calculate_total_shading_area_with_invalid_vertices(self):
         """Test calculating total shading area with invalid vertex data."""
@@ -1931,8 +1997,76 @@ class TestCalculateTotalShadingArea:
         setattr(invalid_shading, 'Vertex_1_Ycoordinate', None)
         setattr(invalid_shading, 'Vertex_1_Zcoordinate', None)
         
-        self.mock_idf.idfobjects['SHADING:BUILDING:DETAILED'] = [invalid_shading]
+        mock_idf = Mock()
+        mock_idf.idfobjects = {'SHADING:BUILDING:DETAILED': [invalid_shading]}
         
-        total_area = calculate_total_shading_area(self.mock_idf)
+        total_area = calculate_total_shading_area(mock_idf)
         
         assert total_area == 0.0
+
+    def test_copies_spectral_data_and_retargets_glazing(self):
+        # Setup a glazing material that references spectral data
+        win = SimpleNamespace()
+        win.Construction_Name = 'WinCons2'
+        self.src.idfobjects['FENESTRATIONSURFACE:DETAILED'] = [win]
+
+        cons = SimpleNamespace()
+        cons.Name = 'WinCons2'
+        cons.Outside_Layer = 'LoE_Clear_6mm'
+        self.src.idfobjects['CONSTRUCTION'] = [cons]
+
+        glz = SimpleNamespace()
+        glz.Name = 'LoE_Clear_6mm'
+        glz.Spectral_Data_Set_Name = 'SpectralSet_A'
+        self.src.idfobjects['WINDOWMATERIAL:GLAZING'] = [glz]
+
+        spectral = SimpleNamespace()
+        spectral.Name = 'SpectralSet_A'
+        self.src.idfobjects['MATERIALPROPERTY:GLAZINGSPECTRALDATA'] = [spectral]
+
+        mapping = copy_window_constructions_and_materials(self.src, self.dst, suffix='__T')
+
+        # Ensure construction copied
+        assert mapping.get('WinCons2') == 'WinCons2__T'
+        # Ensure newidfobject was called for glazing and spectral data
+        calls = self.dst.newidfobject.call_args_list
+        created_keys = [c.args[0] for c in calls]
+        assert 'MATERIALPROPERTY:GLAZINGSPECTRALDATA' in created_keys
+        assert 'WINDOWMATERIAL:GLAZING' in created_keys
+
+
+class TestBulkCopyWindowRelatedObjects:
+    def test_bulk_copies_missing_by_class(self):
+        src = Mock()
+        dst = Mock()
+        # Prepare source objects
+        cons = SimpleNamespace(); cons.Name = 'C1'
+        glz = SimpleNamespace(); glz.Name = 'G1'
+        gas = SimpleNamespace(); gas.Name = 'GA1'
+        spec = SimpleNamespace(); spec.Name = 'S1'
+
+        src.idfobjects = {
+            'CONSTRUCTION': [cons],
+            'WINDOWMATERIAL:GLAZING': [glz],
+            'WINDOWMATERIAL:GAS': [gas],
+            'MATERIALPROPERTY:GLAZINGSPECTRALDATA': [spec],
+        }
+        dst.idfobjects = {
+            'CONSTRUCTION': [],
+            'WINDOWMATERIAL:GLAZING': [],
+            'WINDOWMATERIAL:GAS': [],
+            'MATERIALPROPERTY:GLAZINGSPECTRALDATA': [],
+        }
+
+        created = []
+        def factory(key):
+            ns = SimpleNamespace(); ns.key = key; created.append(ns); return ns
+        dst.newidfobject = Mock(side_effect=factory)
+        dst.copyidfobject = Mock(side_effect=Exception('no copy'))
+
+        report = bulk_copy_window_related_objects(src, dst)
+
+        assert report['CONSTRUCTION'] == 1
+        assert report['WINDOWMATERIAL:GLAZING'] == 1
+        assert report['WINDOWMATERIAL:GAS'] == 1
+        assert report['MATERIALPROPERTY:GLAZINGSPECTRALDATA'] == 1

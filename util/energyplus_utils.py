@@ -14,7 +14,7 @@ from eppy.modeleditor import IDF
 from .simulation_utils import extract_district_heating_from_htm, parse_eso_file, extract_zone_temperatures
 from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
-from typing import Dict, Tuple, List, Optional, Any
+from typing import Dict, Tuple, List, Optional, Any, Set
 
 def _collect_vertices(surface, count: int = 4) -> Tuple[List[float], List[float], List[float]]:
     """Return lists of x, y, z from up to 4 vertices on a surface.
@@ -1498,7 +1498,7 @@ def build_seasonal_shading_schedules(optimization_variables, element_configs):
         element_name = config['name']
         element_type = config['type']
         start_idx = config['start_idx']
-        time_slots = config['time_slots']
+        # time_slots not directly used here; keep for API compatibility
         fixed_morning = config.get('fixed_morning')
         
         if element_type == 'full_day':
@@ -1519,7 +1519,7 @@ def build_seasonal_shading_schedules(optimization_variables, element_configs):
             )
             var_idx += 12
         else:
-            raise ValueError(f"Unknown element type: {element_type}")
+            raise ValueError('Unknown element type: %s' % element_type)
         
         # Convert to seasonal dict format
         seasonal_dict = {}
@@ -1565,7 +1565,7 @@ def calculate_total_shading_area(idf) -> float:
                 area = _calculate_polygon_area(vertices)
                 total_area += area
                 
-        except (AttributeError, ValueError, TypeError) as e:
+        except (AttributeError, ValueError, TypeError):
             # Skip invalid shading elements
             continue
     
@@ -1891,3 +1891,132 @@ def create_shading_overhangs_and_fins_by_orientation(
                 )
 
     return idf
+
+
+
+
+def _copy_idf_object(dst: IDF, obj: Any, key_hint: Optional[str] = None):
+    """Copy an IDF object into dst. Fallback to creating new and copying attrs.
+
+    Args:
+        dst: Destination IDF
+        obj: Source object instance
+        key_hint: Optional IDD object key when copy API not available
+    Returns:
+        The new object in dst, or None on failure
+    """
+    try:
+        return dst.copyidfobject(obj)  # type: ignore[attr-defined]
+    except Exception:
+        key = key_hint or getattr(obj, 'key', None) or getattr(obj, 'objls', [None])[0]
+        if not key:
+            return None
+        new_obj = dst.newidfobject(str(key))
+        for attr in dir(obj):
+            if attr.startswith('_'):
+                continue
+            try:
+                val = getattr(obj, attr)
+            except Exception:
+                continue
+            if callable(val):
+                continue
+            try:
+                setattr(new_obj, attr, val)
+            except Exception:
+                pass
+        return new_obj
+
+def bulk_copy_window_related_objects(src: IDF, dst: IDF) -> Dict[str, int]:
+    """Copy all window-related objects by class if missing in destination.
+
+    Classes copied:
+    - CONSTRUCTION
+    - MATERIALPROPERTY:GLAZINGSPECTRALDATA
+    - All classes starting with WINDOWMATERIAL:
+
+    Objects are copied by original name only if that name doesn't already
+    exist in the destination for the same class. No renaming or retargeting
+    is performed. This keeps behavior simple and predictable.
+
+    Returns a dict of class name -> number of objects copied.
+    """
+    if not src or not dst:
+        return {}
+
+    classes: Set[str] = set()
+    classes.add('CONSTRUCTION')
+    # Base material classes
+    classes.add('MATERIAL')
+    classes.add('MATERIAL:NOMASS')
+    classes.add('MATERIAL:INFRAREDTRANSPARENT')
+    # Include all MaterialProperty:Glazing* classes (e.g., GlazingSpectralData)
+    for key in src.idfobjects.keys():
+        ukey = str(key).upper()
+        if ukey.startswith('MATERIALPROPERTY:GLAZING'):
+            classes.add(str(key))
+    # Include all WindowMaterial:* classes
+    for key in src.idfobjects.keys():
+        ukey = str(key).upper()
+        if ukey.startswith('WINDOWMATERIAL:'):
+            classes.add(str(key))
+    # Include all WindowProperty:* classes (e.g., FrameAndDivider, ShadingControl)
+    for key in src.idfobjects.keys():
+        ukey = str(key).upper()
+        if ukey.startswith('WINDOWPROPERTY:'):
+            classes.add(str(key))
+
+    copied_counts: Dict[str, int] = {cls: 0 for cls in classes}
+
+    for cls in sorted(classes):
+        src_objs = src.idfobjects.get(cls, [])
+        dst_objs = dst.idfobjects.get(cls, [])
+        dst_names = {
+            str(getattr(o, 'Name', '')).strip() for o in dst_objs if hasattr(o, 'Name')
+        }
+
+        for obj in src_objs:
+            name = str(getattr(obj, 'Name', '')).strip()
+            if not name or name in dst_names:
+                continue
+            new_obj = _copy_idf_object(dst, obj, key_hint=cls)
+            if new_obj is None:
+                continue
+            try:
+                new_obj.Name = name
+            except Exception:
+                pass
+            dst_names.add(name)
+            copied_counts[cls] += 1
+
+    # Remove classes with zero copies for a cleaner report
+    return {k: v for k, v in copied_counts.items() if v > 0}
+
+
+def bulk_copy_window_related_objects_files(
+    src_path: str,
+    dst_path: str,
+    idd_path: Optional[str] = None,
+    save_as: Optional[str] = None,
+) -> Dict[str, int]:
+    """File-based wrapper for bulk copying window-related objects.
+
+    Copies by original names, only when missing in destination.
+    Saves to save_as if provided, else overwrites destination.
+    """
+    if idd_path:
+        IDF.setiddname(idd_path)
+
+    src_idf = IDF(src_path)
+    dst_idf = IDF(dst_path)
+
+    report = bulk_copy_window_related_objects(src_idf, dst_idf)
+
+    if save_as:
+        dst_idf.save(save_as)
+    else:
+        dst_idf.save()
+
+    return report
+
+
