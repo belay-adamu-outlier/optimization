@@ -356,7 +356,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
                 output_dir = run_simulation(
-                    idf_path="BEMs/Building_SW_Shading_Renamed - Copy.idf",
+                    idf_path="BEMs/Building_SW_Shading_Renamed.idf",
                     weather_path=self.weather_file,
                     params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
