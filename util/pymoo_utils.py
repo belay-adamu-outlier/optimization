@@ -37,6 +37,14 @@ def get_optimization_variables(optimization_type):
     """
     if optimization_type.lower() == 'shading':
         return dict(SHADING_VARIABLE_BOUNDS)
+    if optimization_type.lower() == 'shading_wwr':
+        # Merge shading bounds with WWR floats (as decimals 0-1) for south/west
+        merged = dict(SHADING_VARIABLE_BOUNDS)
+        merged.update({
+            'wwr_south': {'min': 0.2, 'max': 0.4},
+            'wwr_west': {'min': 0.2, 'max': 0.4},
+        })
+        return merged
     else:
         return initialize_envelope_optimization_variables()
 
@@ -80,7 +88,7 @@ def get_params(optimization_type, x, optimization_variables):
     opt = optimization_type.lower()
     params: dict = {}
 
-    if opt == 'shading':
+    if opt in ('shading', 'shading_wwr'):
         # Continuous variables within bounds
         var_idx = 0
         for var_name, bounds in optimization_variables.items():
@@ -128,6 +136,13 @@ def get_params(optimization_type, x, optimization_variables):
 
         if dims:
             params['shading_dimensions'] = dims
+
+        # If this is the hybrid shading_wwr, ensure WWRs are decimal floats
+        if opt == 'shading_wwr':
+            if 'wwr_south' in params:
+                params['wwr_south'] = float(params['wwr_south'])
+            if 'wwr_west' in params:
+                params['wwr_west'] = float(params['wwr_west'])
         return params
 
     # Envelope: categorical indexes and WWRs

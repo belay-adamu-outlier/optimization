@@ -51,6 +51,7 @@ def test_initialize_shading_optimization_variables_structure():
 @pytest.mark.parametrize('opt_type, key', [
     ('shading', 'south_overhang_depth'),
     ('envelope', 'wwr_south'),
+    ('shading_wwr', 'wwr_south'),
     ('SHADING', 'south_overhang_depth'),
 ])
 def test_get_optimization_variables(opt_type, key):
@@ -147,4 +148,26 @@ def test_get_params_envelope_maps_correctly_and_duplicates():
     assert params['external_wall'] == params['wall_construction']
     assert params['roof'] == params['roof_construction']
     assert params['window'] == params['window_construction']
+
+
+def test_get_params_shading_wwr_maps_both_sets():
+    # Merge some shading bounds with WWRs
+    vars = get_optimization_variables('shading_wwr')
+    # Build x in the same order as vars dict iteration
+    x = []
+    for name, bounds in vars.items():
+        # pick mid value within bounds
+        val = (bounds['min'] + bounds['max']) / 2.0
+        x.append(val)
+
+    params = get_params('shading_wwr', x, vars)
+    # Contains shading_dimensions and decimal WWRs
+    assert 'shading_dimensions' in params
+    # If keys exist, they should be floats in 0..1
+    if 'wwr_south' in vars:
+        assert isinstance(params.get('wwr_south'), float)
+        assert 0 <= params['wwr_south'] <= 1
+    if 'wwr_west' in vars:
+        assert isinstance(params.get('wwr_west'), float)
+        assert 0 <= params['wwr_west'] <= 1
 

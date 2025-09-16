@@ -145,13 +145,16 @@ def _get_optimization_type_choice():
     print("Optimization type options:")
     print("1. Envelope optimization (default)")
     print("2. Shading optimization")
+    print("3. Shading + WWR optimization")
     
-    choice = input("Enter choice (1-2) or press Enter for default value of 1: ").strip()
+    choice = input("Enter choice (1-3) or press Enter for default value of 1: ").strip()
     
     if choice == "1" or choice == "":
         return "envelope"
     elif choice == "2":
         return "shading"
+    elif choice == "3":
+        return "shading_wwr"
     else:
         print("Invalid choice, using default: envelope")
         return "envelope"

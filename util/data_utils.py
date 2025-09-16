@@ -76,9 +76,9 @@ def x_to_params(x, optimization_variables):
 
 
 def print_optimization_table(
-    solutions_by_key, 
-    variable_names, 
-    generation, 
+    solutions_by_key,
+    variable_names,
+    generation,
     constrained_analysis=False,
     overheating_criterion='ASHRAE',
     problem_type='envelope'
@@ -103,7 +103,12 @@ def print_optimization_table(
         col_widths[var_name] = min(max_width + 2, 15)
     
     print(f"\n{'='*100}")
-    print(f"OPTIMIZATION RESULTS - {'PARETO OPTIMAL + ' if not constrained_analysis else ''} LAST 100 ITERATIONS")
+    is_multiobjective = (
+        problem_type in ('shading', 'shading_wwr')
+        or (problem_type == 'envelope' and not constrained_analysis)
+    )
+    title_prefix = 'PARETO OPTIMAL + ' if is_multiobjective else ''
+    print(f"OPTIMIZATION RESULTS - {title_prefix}LAST 100 ITERATIONS")
     print(f"{'='*100}")
     
     # Create header with fixed widths
@@ -136,7 +141,7 @@ def print_optimization_table(
     if problem_type == 'shading':
         header_parts.extend([f"{'Total_Shading_Area':<18}"])
     
-    if not constrained_analysis:
+    if is_multiobjective:
         header_parts.extend([f"{'Pareto_Opt':<10}"])
     
     header = " ".join(header_parts)
@@ -148,7 +153,7 @@ def print_optimization_table(
     
     # Get Pareto optimal solutions
     pareto_solutions = []
-    if not constrained_analysis:
+    if is_multiobjective:
         pareto_solutions = [result for result in all_solutions if result.get('pareto_optimal', False)]
     
     # Get last 100 iterations (or all if less than 100)
@@ -170,7 +175,7 @@ def print_optimization_table(
     
     # Print filtered results
     for result in solutions_to_show:
-        if not constrained_analysis:
+        if is_multiobjective:
             pareto_mark = "✓" if result.get('pareto_optimal', False) else " "
         
         line_parts = [
@@ -208,7 +213,7 @@ def print_optimization_table(
         if problem_type == 'shading':
             line_parts.extend(f"{result.get('total_shading_area', 0.0):<18.2f}")
 
-        if not constrained_analysis:
+        if is_multiobjective:
             line_parts.extend(f"{pareto_mark:<10} ")
         
         line = " ".join(line_parts)
@@ -220,7 +225,7 @@ def print_optimization_table(
     shown_count = len(solutions_to_show)
     print("\nSummary:")
     print(f"  Total solutions evaluated: {total_solutions}")
-    if not constrained_analysis:
+    if is_multiobjective:
         print(f"  Pareto optimal solutions: {pareto_count}")
     print(f"  Solutions shown: {shown_count}")
     print(f"  Current generation: {generation}")
@@ -344,7 +349,7 @@ def initialize_csv(
 # Helper functions for CSV header/row construction
 
 def _objective_headers(problem_type, constrained_analysis, overheating_criterion):
-    if problem_type == 'shading':
+    if problem_type == 'shading' or problem_type == 'shading_wwr':
         return [
             'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
@@ -382,6 +387,16 @@ def _csv_fieldnames(
         ]
         tail = ['Pareto_Optimal'] if multiobjective else []
         return base + vars_part + objs + tail
+    if problem_type == 'shading_wwr':
+        # Similar to shading; still record shading objectives and include Pareto column
+        vars_part = variable_names or []
+        objs = [
+            'Thermal_Energy_Demand_Intensity',
+            'Max_Living_Room_Overheating',
+            'Max_Bedroom_Overheating'
+        ]
+        tail = ['Pareto_Optimal'] if multiobjective else []
+        return base + vars_part + objs + tail
     
     # Envelope optimization
     vars_part = variable_names or []
@@ -406,7 +421,7 @@ def _format_row(
         'Iteration': result.get('iteration') or 0
     }
 
-    if problem_type == 'shading':
+    if problem_type == 'shading' or problem_type == 'shading_wwr':
         # For shading problems, include optimization variables first
         if variable_names:
             for var_name in variable_names:
@@ -419,7 +434,9 @@ def _format_row(
         row['Thermal_Energy_Demand_Intensity'] = '%.4f' % result.get('thermal_energy_demand_intensity', 0.0)
         row['Max_Living_Room_Overheating'] = '%.2f' % result.get('max_living_room_overheating', 0.0)
         row['Max_Bedroom_Overheating'] = '%.2f' % result.get('max_bedroom_overheating', 0.0)
-        row['Total_Shading_Area'] = '%.2f' % result.get('total_shading_area', 0.0)
+        # Total_Shading_Area exists only for shading geometry runs
+        if problem_type == 'shading':
+            row['Total_Shading_Area'] = '%.2f' % result.get('total_shading_area', 0.0)
         if multiobjective:
             row['Pareto_Optimal'] = '' if mode == 'run' else (
                 'Yes' if result.get('pareto_optimal', False) else 'No')
@@ -514,9 +531,19 @@ def save_final_results(
     if not all_solutions:
         return
 
-    # Calculate Pareto optimality for unconstrained problems
-    if not constrained_analysis and multiobjective:
-        if problem_type == 'shading':
+    # Calculate Pareto optimality for multiobjective problems
+    if multiobjective:
+        if problem_type == 'shading_wwr':
+            # Use transformed objectives: [TEDI_with_penalty, -wwr_south, -wwr_west]
+            F = np.array([
+                [
+                    s.get('tedi_with_penalty', s.get('thermal_energy_demand_intensity', 0.0)),
+                    -float(s.get('wwr_south') or 0.0),
+                    -float(s.get('wwr_west') or 0.0),
+                ]
+                for s in all_solutions
+            ])
+        elif problem_type == 'shading':
             # Use the selected objective names to build F in order
             names = objective_names or [
                 'Thermal_Energy_Demand_Intensity',

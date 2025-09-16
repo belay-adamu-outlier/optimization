@@ -946,7 +946,13 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
     return [base_vertices[i] for i in range(4)]
 
 
-def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
+def apply_wwr_to_windows(
+    idf, 
+    wwr_east=None, 
+    wwr_west=None, 
+    wwr_north=None, 
+    wwr_south=None
+):
     fenestrations = idf.idfobjects['FENESTRATIONSURFACE:DETAILED']
     for fenestration in fenestrations:
         parent_wall_name = fenestration.Building_Surface_Name
@@ -988,6 +994,11 @@ def apply_wwr_to_windows(idf, wwr_east, wwr_west, wwr_north, wwr_south):
             wwr = wwr_west
         else:
             wwr = wwr_south
+
+        # Skip if no WWR provided for this orientation
+        if wwr is None:
+            continue
+        wwr = float(wwr)
         
         # Calculate wall area (assume rectangle)
         v0, v1, v2, v3 = wall_vertices
@@ -1076,14 +1087,14 @@ def modify_idf(idf, parameters, save=False, save_path=None):
     if 'infiltration_ach' in parameters:
         apply_infiltration_to_zones(idf, parameters['infiltration_ach'])
 
-    # Apply WWR only if all four orientations are provided
-    if all(key in parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
+    # Apply WWR for any orientations provided
+    if any(key in parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
         apply_wwr_to_windows(
             idf,
-            parameters['wwr_east'],
-            parameters['wwr_west'],
-            parameters['wwr_north'],
-            parameters['wwr_south']
+            parameters.get('wwr_east'),
+            parameters.get('wwr_west'),
+            parameters.get('wwr_north'),
+            parameters.get('wwr_south')
         )
 
     # Apply albedo

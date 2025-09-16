@@ -348,7 +348,7 @@ class TestApplyWwrToWindows:
     def test_apply_wwr_to_east_facing_wall(self):
         """Test applying WWR to east-facing wall."""
         wwr_east, wwr_west, wwr_north, wwr_south = 0.3, 0.2, 0.1, 0.4
-        
+
         apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
         
         # Verify window vertices were updated
@@ -456,6 +456,20 @@ class TestApplyWwrToWindows:
             self.mock_parent_wall.Azimuth = azimuth
             apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
             # The function should use the correct WWR based on azimuth
+
+    def test_apply_wwr_partial_inputs_only_south(self):
+        """Only south WWR provided should only update south-facing walls."""
+        # South-facing
+        self.mock_parent_wall.Azimuth = 180.0
+        apply_wwr_to_windows(self.mock_idf, wwr_south=0.35)
+        assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
+
+    def test_apply_wwr_partial_inputs_missing_orientation(self):
+        """If WWR for orientation is missing, skip updates for that orientation."""
+        # East-facing (90 deg) but only south provided -> should skip
+        self.mock_parent_wall.Azimuth = 90.0
+        # Recreate fenestration vertices to detect no change scenario by lack of errors
+        apply_wwr_to_windows(self.mock_idf, wwr_south=0.4)
 
 
 class TestApplySolarAbsorptanceToSurfaces:

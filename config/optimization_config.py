@@ -69,7 +69,7 @@ class EvaluationCallback(Callback):
         self.overheating_criterion = overheating_criterion
 
         # Set objective names and multiobjective flag for shading optimization
-        if optimization_type == 'shading':
+        if optimization_type in ('shading', 'shading_wwr'):
             self.objective_names = [
                 'Thermal_Energy_Demand_Intensity',
                 'Max_Living_Room_Overheating',
@@ -101,7 +101,7 @@ class EvaluationCallback(Callback):
         )
 
         # Initialize plotting based on optimization type
-        if self.optimization_type == 'shading':
+        if self.optimization_type in ('shading', 'shading_wwr'):
             self.fig, self.axes, self.scatter_all, self.scatter_pareto = initialize_shading_optimization_plot(
                 self.constrained_analysis, self.overheating_criterion
             )
@@ -130,7 +130,7 @@ class EvaluationCallback(Callback):
         # Rebuild solutions listing from cache for plotting/reporting
         self._rebuild_solutions_from_cache()
 
-        if not self.constrained_analysis:
+        if self.multiobjective:
             update_pareto_optimality_for_display(self.solutions_by_key, self.all_objectives)
 
         print_optimization_table(
@@ -142,7 +142,7 @@ class EvaluationCallback(Callback):
             problem_type=self.optimization_type,
         )
 
-        if self.optimization_type == 'shading':
+        if self.optimization_type in ('shading', 'shading_wwr'):
             update_shading_optimization_plot(
                 self.solutions_by_key,
                 generation=self.generation,
@@ -182,6 +182,7 @@ class EvaluationCallback(Callback):
             total_evals = len(X)
         except Exception:
             total_evals = 0
+
         print_generation_summary(
             self.generation,
             total_evals,
@@ -196,7 +197,7 @@ class EvaluationCallback(Callback):
         Populates:
         - self.solutions_by_key: key -> solution summary dict
         - self.solutions_by_generation: generation -> [keys]
-        - self.all_objectives: [[tedi, overheating], ...]
+        - self.all_objectives: [[tedi, overheating], ...] or 3-objs for shading_wwr
         """
         # Reset containers
         self.solutions_by_key = {}
@@ -231,7 +232,7 @@ class EvaluationCallback(Callback):
             else:
                 solution['pareto_optimal'] = False
 
-            if self.optimization_type == 'shading':
+            if self.optimization_type in ('shading', 'shading_wwr'):
                 solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
                 solution['max_bedroom_overheating'] = entry.get('max_bedroom_overheating', 0.0)
                 solution['total_shading_area'] = entry.get('total_shading_area', 0.0)
@@ -241,7 +242,20 @@ class EvaluationCallback(Callback):
 
             self.solutions_by_key[combination_key] = solution
             self.solutions_by_generation.setdefault(generation, []).append(combination_key)
-            self.all_objectives.append([tedi, overheating])
+
+            if self.optimization_type == 'shading_wwr':
+                # 3 objectives: [TEDI_with_penalty, -WWR_south, -WWR_west]
+                penalty = compute_shading_penalty(params, self.optimization_variables, self.optimization_type)
+                wwr_s = float(params.get('wwr_south', 0.0) or 0.0)
+                wwr_w = float(params.get('wwr_west', 0.0) or 0.0)
+                solution['tedi_with_penalty'] = float(tedi) + penalty
+                self.all_objectives.append([
+                    float(tedi) + penalty,
+                    -wwr_s,
+                    -wwr_w,
+                ])
+            else:
+                self.all_objectives.append([tedi, overheating])
 
     def save_final_results(self):
         save_final_results(
@@ -272,7 +286,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         n_var = len(optimization_variables)
 
         # Set variable bounds based on optimization type
-        if optimization_type == 'shading':
+        if optimization_type in ('shading', 'shading_wwr'):
             xl = np.array([bounds['min'] for bounds in optimization_variables.values()], dtype=float)
             xu = np.array([bounds['max'] for bounds in optimization_variables.values()], dtype=float)
             vtype = float
@@ -285,9 +299,17 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
         n_ieq_constr = get_problem_constraints(optimization_type, constrained_analysis, overheating_criterion)
 
+        # Determine number of objectives
+        if optimization_type == 'shading_wwr':
+            # Min TEDI (with penalty), Max WWR_south, Max WWR_west -> 3 objectives
+            n_obj = 3
+        else:
+            # Envelope: 2 when unconstrained, 1 when constrained
+            n_obj = 1 if constrained_analysis else 2
+
         super().__init__(
             n_var=n_var,
-            n_obj=1 if constrained_analysis else 2,
+            n_obj=n_obj,
             n_ieq_constr=n_ieq_constr,
             xl=xl,
             xu=xu,
@@ -312,6 +334,9 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
         try:
             params = get_params(self.optimization_type, x, self.optimization_variables)
             combination_key = make_cache_key(params)
+
+            # Flag for shading_wwr; populate_with_cache now returns 3 objectives already
+            is_shading_wwr = (self.optimization_type == 'shading_wwr')
 
             # Try cache first; if hit, populate out with penalized TEDI (cache remains raw)
             if populate_with_cache(
@@ -376,7 +401,16 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     total_shading_area=total_area,
                 )
 
-            # Set outputs directly with penalized TEDI
+            # Set outputs directly
+            if is_shading_wwr:
+                # Build WWR objectives here (no penalty on WWRs)
+                f_wwr_s = -float(params.get('wwr_south') or 0.0)
+                f_wwr_w = -float(params.get('wwr_west') or 0.0)
+                out['F'] = [tedi_with_penalty, f_wwr_s, f_wwr_w]
+                if self.constrained_analysis:
+                    out['G'] = [lr - 110, br - 32]
+                return
+
             if not self.constrained_analysis:
                 out["F"] = [tedi_with_penalty, overheating]
                 return
@@ -385,7 +419,10 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             return
             
         except Exception as _:
-            out["F"] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
+            if self.optimization_type == 'shading_wwr':
+                out['F'] = [1000.0, 1000.0, 1000.0]
+            else:
+                out['F'] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
             if not self.constrained_analysis:
                 return
             out["G"] = [1000.0, 1000.0]
@@ -407,12 +444,12 @@ def cleanup_pool(pool):
         print("Closed multiprocessing pool")
 
 def create_algorithm(optimization_type, population_size=None, crossover_prob=None, mutation_prob=None) -> NSGA2:
-    vtype = float if optimization_type == 'shading' else int
+    vtype = float if optimization_type in ('shading', 'shading_wwr') else int
     repair = RoundingRepair() if optimization_type == 'envelope' else None
     
     args = {
         'pop_size': population_size or 50,
-        'sampling': FloatRandomSampling() if optimization_type == 'shading' else IntegerRandomSampling(),
+        'sampling': FloatRandomSampling() if optimization_type in ('shading', 'shading_wwr') else IntegerRandomSampling(),
         'crossover': SBX(prob=crossover_prob or 0.5, eta=5, vtype=vtype, repair=repair),
         'mutation': PM(prob=mutation_prob or 0.125, eta=5, vtype=vtype, repair=repair),
         'eliminate_duplicates': True,

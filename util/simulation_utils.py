@@ -35,7 +35,7 @@ def compute_shading_penalty(
         float: Penalty to add to TEDI.
     """
     try:
-        if optimization_type != 'shading' or not isinstance(params, dict):
+        if optimization_type not in ('shading', 'shading_wwr') or not isinstance(params, dict):
             return 0.0
 
         penalty_sum = 0.0
@@ -514,9 +514,21 @@ def populate_with_cache(
 
     # Compute penalty from cached params
     params = cached_entry.get('params') or {}
-    tedi_penalized = tedi_raw + compute_shading_penalty(params, optimization_variables or {}, optimization_type or '')
+    penalty = compute_shading_penalty(
+        params,
+        optimization_variables or {},
+        optimization_type or ''
+    )
+    tedi_penalized = tedi_raw + penalty
 
-    out["F"] = [tedi_penalized] if is_constrained_analysis else [tedi_penalized, overheating]
+    # For shading_wwr, return 3 objectives: [TEDI_pen, -WWR_south, -WWR_west]
+    if (optimization_type or '').lower() == 'shading_wwr':
+        wwr_s = float(params.get('wwr_south') or 0.0)
+        wwr_w = float(params.get('wwr_west') or 0.0)
+        # Penalize only TEDI to avoid distorting WWR trade-offs
+        out["F"] = [tedi_penalized, -wwr_s, -wwr_w]
+    else:
+        out["F"] = [tedi_penalized] if is_constrained_analysis else [tedi_penalized, overheating]
 
     # Constraints (overheating only)
     lr = cached_entry.get('max_living_room_overheating', 0.0) or 0.0
