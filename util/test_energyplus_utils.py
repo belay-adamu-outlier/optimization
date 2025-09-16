@@ -247,27 +247,26 @@ class TestCalculateWindowGeometry:
         y_coords = [v[1] for v in new_vertices]
         assert all(y == 5 for y in y_coords)
     
-    def test_calculate_window_geometry_aspect_ratio_selection(self):
-        """Test that appropriate aspect ratios are selected based on window area."""
-        vertices = [(0, 0, 1), (0, 2, 1), (0, 2, 3), (0, 0, 3)]
+    def test_calculate_window_geometry_fixed_height_and_width_from_wwr(self):
+        """Height fixed to 1.5 m; width = (wall_area*wwr)/1.5."""
+        vertices = [(0, 0, 1), (0, 2, 1), (0, 2, 3), (0, 0, 3)]  # X-fixed → vary Y
         wall_area = 20.0
         sill_height = 1.0
-        
-        # Small window area (< 1.5)
-        wwr_small = 0.05  # 1.0 m² window
-        new_vertices_small = calculate_window_geometry(vertices, wwr_small, wall_area, sill_height, 0.0)
-        
-        # Medium window area (1.5 - 3.5)
-        wwr_medium = 0.15  # 3.0 m² window
-        new_vertices_medium = calculate_window_geometry(vertices, wwr_medium, wall_area, sill_height, 0.0)
-        
-        # Large window area (> 3.5)
-        wwr_large = 0.25  # 5.0 m² window
-        new_vertices_large = calculate_window_geometry(vertices, wwr_large, wall_area, sill_height, 0.0)
-        
-        # Verify different aspect ratios produce different geometries
-        assert new_vertices_small != new_vertices_medium
-        assert new_vertices_medium != new_vertices_large
+
+        def check_case(wwr):
+            new_vertices = calculate_window_geometry(vertices, wwr, wall_area, sill_height, 0.0)
+            z_vals = [v[2] for v in new_vertices]
+            y_vals = [v[1] for v in new_vertices]
+            height = max(z_vals) - min(z_vals)
+            width = max(y_vals) - min(y_vals)
+            expected_area = wall_area * wwr
+            expected_height = 1.5
+            expected_width = expected_area / expected_height
+            assert abs(height - expected_height) < 1e-6
+            assert abs(width - expected_width) < 1e-6
+
+        for w in [0.05, 0.15, 0.25]:
+            check_case(w)
     
     def test_calculate_window_geometry_non_axis_aligned_error(self):
         """Test that non-axis-aligned windows raise ValueError."""

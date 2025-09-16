@@ -869,10 +869,11 @@ def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
 
 def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimuth):
     """
-    Given the original window vertices, WWR, wall area, sill height, and wall azimuth,
-    return new vertices for the window that use an appropriate aspect ratio for the area,
-    are horizontally centered, and maintain the sill height and wall orientation.
-    The returned vertices will be in the same winding order as the input vertices.
+    Recompute window vertices from WWR using a fixed 1.5 m height.
+
+    Uses window_area = wall_area * wwr. Sets height to 1.5 m and derives width
+    from area/height. Preserves sill height and centers horizontally on the
+    wall's variable axis. The returned vertices follow the original winding.
     """
     vertices = np.array(vertices)
     wall_azimuth = wall_azimuth % 360
@@ -893,17 +894,11 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
     # Calculate center of the variable coordinate (for centering the window)
     center = (np.max(var_vals) + np.min(var_vals)) / 2
     
-    # Calculate new window area and dimensions
+    # Calculate new window area and dimensions (fixed height = 1.5 m)
     window_area = wall_area * wwr
-    if window_area < 1.5:
-        aspect_ratio = 1.0
-    elif window_area < 3.5:
-        aspect_ratio = 1.5
-    else:
-        aspect_ratio = 2.0
-    
-    new_height = np.sqrt(window_area / aspect_ratio)
-    new_width = aspect_ratio * new_height
+    fixed_height = 1.5
+    new_height = fixed_height
+    new_width = window_area / fixed_height
     
     # Keep original sill height
     new_z_min = sill_height
