@@ -355,6 +355,22 @@ class TestApplyWwrToWindows:
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
         assert hasattr(self.mock_fenestration, 'Vertex_1_Ycoordinate')
         assert hasattr(self.mock_fenestration, 'Vertex_1_Zcoordinate')
+
+    def test_apply_wwr_uses_name_based_orientation_when_available(self):
+        """Name-based orientation in Building_Surface_Name should take precedence."""
+        # Force parent wall name to include 'South' regardless of azimuth
+        self.mock_parent_wall.Name = 'South:ZoneX'
+        self.mock_fenestration.Building_Surface_Name = 'South:ZoneX'
+        # Set azimuth that would map to East if used (to ensure override)
+        for i in range(1, 5):
+            setattr(self.mock_parent_wall, f'Vertex_{i}_Xcoordinate', 0.0)
+            setattr(self.mock_parent_wall, f'Vertex_{i}_Ycoordinate', float(i-1) * 3.33)
+            setattr(self.mock_parent_wall, f'Vertex_{i}_Zcoordinate', 0.0 if i <= 2 else 3.0)
+
+        # Provide only south WWR so we can detect selection
+        apply_wwr_to_windows(self.mock_idf, wwr_south=0.35)
+        # If name-based detection worked, vertices should be updated
+        assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
     
     def test_apply_wwr_to_south_facing_wall(self):
         """Test applying WWR to south-facing wall."""

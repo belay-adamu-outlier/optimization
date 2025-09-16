@@ -883,13 +883,15 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
     if (not np.allclose(x_vals, x_vals[0])) and (not np.allclose(y_vals, y_vals[0])):
         raise ValueError("Window is not axis-aligned!")
     
-    # Determine if wall is primarily North-South or East-West oriented
+    # Determine wall orientation: keep window coplanar with wall
+    # East/West walls: X is constant (YZ plane) → vary Y
+    # North/South walls: Y is constant (XZ plane) → vary X
     if (45 <= wall_azimuth < 135) or (225 <= wall_azimuth < 315):
-        fixed_axis = 'y'
-        var_vals = vertices[:, 0]
-    else:
         fixed_axis = 'x'
         var_vals = vertices[:, 1]
+    else:
+        fixed_axis = 'y'
+        var_vals = vertices[:, 0]
     
     # Calculate center of the variable coordinate (for centering the window)
     center = (np.max(var_vals) + np.min(var_vals)) / 2
@@ -926,14 +928,28 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
             (new_var_min, y_vals[0], new_z_max),
         ]
     # Map new vertices to the original winding order
-    # Find the order of the original vertices (clockwise or counterclockwise)
-    def polygon_area(verts):
-        # Shoelace formula for area (sign gives winding)
-        x = [v[0] for v in verts]
-        y = [v[1] for v in verts]
-        return 0.5 * sum(x[i] * y[(i+1)%4] - x[(i+1)%4] * y[i] for i in range(4))
-    orig_area = polygon_area(vertices)
-    base_area = polygon_area(base_vertices)
+    # Use appropriate projection plane for signed area
+    def signed_area_on_plane(verts, plane: str) -> float:
+        if plane == 'yz':
+            a = [v[1] for v in verts]
+            b = [v[2] for v in verts]
+        elif plane == 'xz':
+            a = [v[0] for v in verts]
+            b = [v[2] for v in verts]
+        else:  # 'xy'
+            a = [v[0] for v in verts]
+            b = [v[1] for v in verts]
+        return 0.5 * sum(a[i] * b[(i + 1) % 4] - a[(i + 1) % 4] * b[i] for i in range(4))
+
+    if fixed_axis == 'x':
+        plane = 'yz'
+    elif fixed_axis == 'y':
+        plane = 'xz'
+    else:
+        plane = 'xy'
+
+    orig_area = signed_area_on_plane(vertices.tolist(), plane)
+    base_area = signed_area_on_plane(base_vertices, plane)
     if np.sign(orig_area) != np.sign(base_area):
         # Reverse the new vertices to match the original winding
         base_vertices = base_vertices[::-1]
@@ -951,6 +967,7 @@ def apply_wwr_to_windows(
     fenestrations = idf.idfobjects['FENESTRATIONSURFACE:DETAILED']
     for fenestration in fenestrations:
         parent_wall_name = fenestration.Building_Surface_Name
+        parent_wall_name_l = str(parent_wall_name or '').lower()
         parent_wall = None
         for wall in idf.idfobjects['BUILDINGSURFACE:DETAILED']:
             if wall.Name == parent_wall_name:
@@ -971,24 +988,33 @@ def apply_wwr_to_windows(
         if len(wall_vertices) < 4:
             continue
         
-        # Calculate azimuth from wall orientation
-        # Use the first two vertices to determine the wall direction
+        # Compute azimuth once from wall geometry for downstream use
         v0, v1 = wall_vertices[0], wall_vertices[1]
         dx = v1[0] - v0[0]
         dy = v1[1] - v0[1]
-        
-        # Calculate azimuth in degrees (0 = North, 90 = East, 180 = South, 270 = West)
-        # Use arctan2(dy, dx) for correct azimuth calculation
         azimuth = np.degrees(np.arctan2(dy, dx)) % 360
-        
-        if 45 <= azimuth < 135:
-            wwr = wwr_east
-        elif 135 <= azimuth < 225:
-            wwr = wwr_north
-        elif 225 <= azimuth < 315:
-            wwr = wwr_west
-        else:
+
+        # Prefer name-based orientation first
+        wwr = None
+        if 'south' in parent_wall_name_l:
             wwr = wwr_south
+        elif 'west' in parent_wall_name_l:
+            wwr = wwr_west
+        elif 'east' in parent_wall_name_l:
+            wwr = wwr_east
+        elif 'north' in parent_wall_name_l:
+            wwr = wwr_north
+        
+        # Fallback to azimuth-based orientation if name not informative
+        if wwr is None:
+            if 45 <= azimuth < 135:
+                wwr = wwr_east
+            elif 135 <= azimuth < 225:
+                wwr = wwr_north
+            elif 225 <= azimuth < 315:
+                wwr = wwr_west
+            else:
+                wwr = wwr_south
 
         # Skip if no WWR provided for this orientation
         if wwr is None:
@@ -2025,4 +2051,126 @@ def bulk_copy_window_related_objects_files(
 
     return report
 
+
+
+def copy_window_constructions_and_materials(
+    src: IDF,
+    dst: IDF,
+    suffix: str = ''
+) -> Dict[str, str]:
+    """
+    Copy window constructions referenced by windows in src to dst with a name suffix.
+
+    - Copies the CONSTRUCTION and any referenced WINDOWMATERIAL:* or MATERIAL:* layers.
+    - Copies referenced MATERIALPROPERTY:GLAZINGSPECTRALDATA if present and rewires glazing.
+    - Returns mapping of original construction name -> new suffixed name.
+    """
+    mapping: Dict[str, str] = {}
+    if not src or not dst:
+        return mapping
+
+    windows = src.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
+    if not windows:
+        return mapping
+
+    # Gather constructions used by windows
+    used_constructions: Set[str] = set()
+    for win in windows:
+        name = getattr(win, 'Construction_Name', None)
+        if name:
+            used_constructions.add(str(name))
+
+    if not used_constructions:
+        return mapping
+
+    # Index source objects by name for quick lookup
+    src_constructions = {str(getattr(c, 'Name', '')): c for c in src.idfobjects.get('CONSTRUCTION', [])}
+    src_glazings = {str(getattr(m, 'Name', '')): m for m in src.idfobjects.get('WINDOWMATERIAL:GLAZING', [])}
+    src_gases = {str(getattr(m, 'Name', '')): m for m in src.idfobjects.get('WINDOWMATERIAL:GAS', [])}
+    src_materials = {str(getattr(m, 'Name', '')): m for m in src.idfobjects.get('MATERIAL', [])}
+    src_spectral = {str(getattr(s, 'Name', '')): s for s in src.idfobjects.get('MATERIALPROPERTY:GLAZINGSPECTRALDATA', [])}
+
+    # Helper to clone an object into dst with a new name
+    def _clone_obj(obj: Any, key: str, new_name: str) -> Any:
+        try:
+            new_obj = dst.newidfobject(key)
+        except Exception:
+            return None
+        # Copy all public attributes
+        for attr in dir(obj):
+            if attr.startswith('_'):
+                continue
+            try:
+                val = getattr(obj, attr)
+            except Exception:
+                continue
+            if callable(val):
+                continue
+            try:
+                setattr(new_obj, attr, val)
+            except Exception:
+                pass
+        # Set new name if applicable
+        try:
+            new_obj.Name = new_name
+        except Exception:
+            pass
+        return new_obj
+
+    for cons_name in used_constructions:
+        cons = src_constructions.get(cons_name)
+        if not cons:
+            continue
+        new_cons_name = f"{cons_name}{suffix}" if suffix else cons_name
+
+        # Create destination CONSTRUCTION
+        new_cons = _clone_obj(cons, 'CONSTRUCTION', new_cons_name)
+        if not new_cons:
+            continue
+
+        mapping[cons_name] = new_cons_name
+
+        # Copy up to, say, 10 layers heuristically (Outside_Layer, Layer_2, ... Layer_10)
+        layer_attrs = ['Outside_Layer'] + [f'Layer_{i}' for i in range(2, 11)]
+        for attr in layer_attrs:
+            mat_name = getattr(cons, attr, None)
+            if not mat_name:
+                continue
+            mat_name = str(mat_name)
+            new_mat_name = f"{mat_name}{suffix}" if suffix else mat_name
+
+            # Glazing
+            if mat_name in src_glazings:
+                glz = src_glazings[mat_name]
+                new_glz = _clone_obj(glz, 'WINDOWMATERIAL:GLAZING', new_mat_name)
+                # Rewire spectral set if present
+                try:
+                    spec_name = getattr(glz, 'Spectral_Data_Set_Name')
+                except Exception:
+                    spec_name = None
+                if spec_name:
+                    spec_name = str(spec_name)
+                    if spec_name in src_spectral:
+                        new_spec_name = f"{spec_name}{suffix}" if suffix else spec_name
+                        _clone_obj(src_spectral[spec_name], 'MATERIALPROPERTY:GLAZINGSPECTRALDATA', new_spec_name)
+                        try:
+                            new_glz.Spectral_Data_Set_Name = new_spec_name
+                        except Exception:
+                            pass
+
+            # Gas layer
+            elif mat_name in src_gases:
+                _clone_obj(src_gases[mat_name], 'WINDOWMATERIAL:GAS', new_mat_name)
+
+            # Opaque material layer (rare in window stacks but safe)
+            elif mat_name in src_materials:
+                _clone_obj(src_materials[mat_name], 'MATERIAL', new_mat_name)
+
+            # Update layer reference in the new construction
+            try:
+                setattr(new_cons, attr, new_mat_name)
+            except Exception:
+                pass
+
+    return mapping
 
