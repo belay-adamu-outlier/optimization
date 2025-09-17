@@ -910,24 +910,41 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
     new_var_min = center - new_width / 2
     new_var_max = center + new_width / 2
     
-    # Build new vertices - use original fixed coordinate values directly
+    # Build rectangle candidates with desired sequence:
+    # Vertex 1: bottom-right, 2: bottom-left, 3: top-left, 4: top-right
     if fixed_axis == 'x':
-        # X is fixed, vary Y
-        base_vertices = [
-            (x_vals[0], new_var_min, new_z_min),
-            (x_vals[0], new_var_max, new_z_min),
-            (x_vals[0], new_var_max, new_z_max),
-            (x_vals[0], new_var_min, new_z_max),
+        x_fixed = x_vals[0]
+        # Candidate A: right = new_var_max, left = new_var_min
+        candA = [
+            (x_fixed, new_var_max, new_z_min),  # BR
+            (x_fixed, new_var_min, new_z_min),  # BL
+            (x_fixed, new_var_min, new_z_max),  # TL
+            (x_fixed, new_var_max, new_z_max),  # TR
+        ]
+        # Candidate B: right = new_var_min, left = new_var_max
+        candB = [
+            (x_fixed, new_var_min, new_z_min),
+            (x_fixed, new_var_max, new_z_min),
+            (x_fixed, new_var_max, new_z_max),
+            (x_fixed, new_var_min, new_z_max),
         ]
     else:
-        # Y is fixed, vary X
-        base_vertices = [
-            (new_var_min, y_vals[0], new_z_min),
-            (new_var_max, y_vals[0], new_z_min),
-            (new_var_max, y_vals[0], new_z_max),
-            (new_var_min, y_vals[0], new_z_max),
+        y_fixed = y_vals[0]
+        # Candidate A: right = new_var_max, left = new_var_min
+        candA = [
+            (new_var_max, y_fixed, new_z_min),  # BR
+            (new_var_min, y_fixed, new_z_min),  # BL
+            (new_var_min, y_fixed, new_z_max),  # TL
+            (new_var_max, y_fixed, new_z_max),  # TR
         ]
-    # Map new vertices to the original winding order
+        # Candidate B: right = new_var_min, left = new_var_max
+        candB = [
+            (new_var_min, y_fixed, new_z_min),
+            (new_var_max, y_fixed, new_z_min),
+            (new_var_max, y_fixed, new_z_max),
+            (new_var_min, y_fixed, new_z_max),
+        ]
+
     # Use appropriate projection plane for signed area
     def signed_area_on_plane(verts, plane: str) -> float:
         if plane == 'yz':
@@ -949,12 +966,12 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
         plane = 'xy'
 
     orig_area = signed_area_on_plane(vertices.tolist(), plane)
-    base_area = signed_area_on_plane(base_vertices, plane)
-    if np.sign(orig_area) != np.sign(base_area):
-        # Reverse the new vertices to match the original winding
-        base_vertices = base_vertices[::-1]
-    # Return new vertices in the same order as the input
-    return [base_vertices[i] for i in range(4)]
+    areaA = signed_area_on_plane(candA, plane)
+
+    # Pick candidate whose winding matches original to preserve outward normal
+    chosen = candA if np.sign(areaA) == np.sign(orig_area) else candB
+
+    return chosen
 
 
 def apply_wwr_to_windows(
