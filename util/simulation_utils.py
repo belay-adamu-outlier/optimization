@@ -11,6 +11,10 @@ from constants.shading_variables import (
     SHADING_VARIABLE_BOUNDS,
     SHADING_PENALTY_WEIGHTS,
 )
+from constants.constraints import (
+    LR_OVERHEATING_MAX_HRS,
+    BR_OVERHEATING_MAX_HRS,
+)
 
 
 def compute_shading_penalty(
@@ -388,11 +392,15 @@ def set_in_cache(
     max_living_room_overheating=None,
     max_bedroom_overheating=None,
     total_shading_area=None,
+    feasible=None,
     **extra
 ):
 
     """Set a value in the shared cache with optional generation info and parameters."""
     if generation is not None or params is not None:
+        # Feasibility should be computed by the caller (problem), default True
+        if feasible is None:
+            feasible = True
         cache_entry = {
             'objectives': value,
             'max_overheating_hours': max_overheating_hours,
@@ -402,6 +410,7 @@ def set_in_cache(
             'max_living_room_overheating': max_living_room_overheating or 0.0,
             'max_bedroom_overheating': max_bedroom_overheating or 0.0,
             'total_shading_area': total_shading_area or 0.0,
+            'feasible': bool(feasible) if feasible is not None else True,
         }
         if extra:
             cache_entry.update(extra)
@@ -534,6 +543,6 @@ def populate_with_cache(
     lr = cached_entry.get('max_living_room_overheating', 0.0) or 0.0
     br = cached_entry.get('max_bedroom_overheating', 0.0) or 0.0
     if is_constrained_analysis:
-        out["G"] = [lr - 110, br - 32]
+        out["G"] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
 
     return True

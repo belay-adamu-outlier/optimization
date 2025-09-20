@@ -26,7 +26,8 @@ from .data_utils import (
     update_pareto_optimality_for_display,
     initialize_csv,
     generate_dummy_envelope_results,
-    generate_dummy_shading_results
+    generate_dummy_shading_results,
+    print_optimization_table,
 )
 
 
@@ -276,6 +277,75 @@ class TestPrintFunctions:
         assert "Number of evaluations: 500" in captured.out
         assert "Total cached combinations: 2" in captured.out
 
+    def test_print_optimization_table_deduplicates_pareto_and_recent(self, capsys):
+        """Pareto solutions should not appear twice in the table."""
+        solutions_by_key = {
+            'a': {
+                'generation': 1,
+                'iteration': 1,
+                'thermal_energy_demand_intensity': 100.0,
+                'average_overheating_hours': 20.0,
+                'max_living_room_overheating': 30.0,
+                'max_bedroom_overheating': 25.0,
+                'pareto_optimal': True,
+                'external_wall': 'R17 - Wall',
+            },
+            'b': {
+                'generation': 1,
+                'iteration': 2,
+                'thermal_energy_demand_intensity': 110.0,
+                'average_overheating_hours': 22.0,
+                'max_living_room_overheating': 31.0,
+                'max_bedroom_overheating': 26.0,
+                'pareto_optimal': False,
+                'external_wall': 'R17 - Wall',
+            },
+        }
+
+        variable_names = ['external_wall']
+        # Envelope, unconstrained => multiobjective True
+        print_optimization_table(
+            solutions_by_key,
+            variable_names,
+            generation=1,
+            constrained_analysis=False,
+            overheating_criterion='ASHRAE',
+            problem_type='envelope',
+        )
+
+        out = capsys.readouterr().out
+        # Row for Gen=1 Iter=1 has fixed-width tokens: '1  ' and '1   ' joined with a space
+        assert out.count('1   1   ') == 1
+
+    def test_print_optimization_table_shading_formatting(self, capsys):
+        """Shading table should include Total_Shading_Area and Pareto mark once."""
+        solutions_by_key = {
+            's1': {
+                'generation': 3,
+                'iteration': 5,
+                'thermal_energy_demand_intensity': 95.0,
+                'max_living_room_overheating': 15.0,
+                'max_bedroom_overheating': 12.0,
+                'total_shading_area': 123.456,
+                'pareto_optimal': True,
+                'shading_schedule': [1, 0] * 12,
+            }
+        }
+
+        print_optimization_table(
+            solutions_by_key,
+            variable_names=['Shading_Schedule'],
+            generation=3,
+            constrained_analysis=False,
+            overheating_criterion='ASHRAE',
+            problem_type='shading',
+        )
+
+        out = capsys.readouterr().out
+        assert 'Total_Shading_Area' in out
+        # Value formatted to 2 decimals should appear
+        assert '123.46' in out
+
 
 class TestParameterConversion:
     """Test cases for parameter conversion functions."""
@@ -325,9 +395,9 @@ class TestParetoOptimality:
     def test_update_pareto_optimality_for_display(self):
         """Test Pareto optimality update for display."""
         solutions_by_key = {
-            'key1': {'pareto_optimal': False},
-            'key2': {'pareto_optimal': False},
-            'key3': {'pareto_optimal': False}
+            'key1': {'pareto_optimal': False, 'feasible': True},
+            'key2': {'pareto_optimal': False, 'feasible': True},
+            'key3': {'pareto_optimal': False, 'feasible': True}
         }
         
         all_objectives = [
@@ -336,13 +406,34 @@ class TestParetoOptimality:
             [90.0, 15.0]    # Solution 3: non-dominated
         ]
         
-        update_pareto_optimality_for_display(solutions_by_key, all_objectives)
+        update_pareto_optimality_for_display(solutions_by_key, all_objectives, constrained_analysis=False)
         
         # Solution 1 should not be Pareto optimal (dominated by solution 2)
         assert not solutions_by_key['key1']['pareto_optimal']
         # Solution 2 should be Pareto optimal
         assert solutions_by_key['key2']['pareto_optimal']
         # Solution 3 should be Pareto optimal
+        assert solutions_by_key['key3']['pareto_optimal']
+
+    def test_update_pareto_optimality_for_display_constrained_filters_infeasible(self):
+        """Pareto should be computed only among feasible solutions when constrained."""
+        solutions_by_key = {
+            'key1': {'pareto_optimal': False, 'feasible': False},  # infeasible but would dominate
+            'key2': {'pareto_optimal': False, 'feasible': True},
+            'key3': {'pareto_optimal': False, 'feasible': True}
+        }
+
+        # key1 is best on both objectives but infeasible; should not be Pareto
+        all_objectives = [
+            [50.0, 10.0],   # key1 (infeasible)
+            [80.0, 20.0],   # key2
+            [90.0, 15.0]    # key3
+        ]
+
+        update_pareto_optimality_for_display(solutions_by_key, all_objectives, constrained_analysis=True)
+
+        assert not solutions_by_key['key1']['pareto_optimal']
+        assert solutions_by_key['key2']['pareto_optimal']
         assert solutions_by_key['key3']['pareto_optimal']
 
 

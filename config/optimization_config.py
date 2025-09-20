@@ -16,7 +16,7 @@ from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.operators.crossover.sbx import SBX
 from pymoo.operators.mutation.pm import PM
 from pymoo.operators.repair.rounding import RoundingRepair
-from pymoo.operators.sampling.rnd import IntegerRandomSampling, FloatRandomSampling
+from pymoo.operators.sampling.rnd import IntegerRandomSampling
 from pymoo.core.problem import StarmapParallelization
 
 from util.pymoo_utils import (
@@ -47,6 +47,10 @@ from util.energyplus_utils import (
     analyze_simulation_results,
 )
 import os
+from constants.constraints import (
+    LR_OVERHEATING_MAX_HRS,
+    BR_OVERHEATING_MAX_HRS,
+)
 class EvaluationCallback(Callback):
     def __init__(
         self,
@@ -131,7 +135,11 @@ class EvaluationCallback(Callback):
         self._rebuild_solutions_from_cache()
 
         if self.multiobjective:
-            update_pareto_optimality_for_display(self.solutions_by_key, self.all_objectives)
+            update_pareto_optimality_for_display(
+                self.solutions_by_key,
+                self.all_objectives,
+                constrained_analysis=self.constrained_analysis,
+            )
 
         print_optimization_table(
             self.solutions_by_key,
@@ -229,8 +237,11 @@ class EvaluationCallback(Callback):
                 if cibse59:
                     solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
                     solution['max_bedroom_overheating'] = entry.get('max_bedroom_overheating', 0.0)
+                # Feasibility comes from cache; default True if missing
+                solution['feasible'] = bool(entry.get('feasible', True))
             else:
                 solution['pareto_optimal'] = False
+                solution['feasible'] = True
 
             if self.optimization_type in ('shading', 'shading_wwr'):
                 solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
@@ -287,9 +298,13 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
         # Set variable bounds based on optimization type
         if optimization_type in ('shading', 'shading_wwr'):
-            xl = np.array([bounds['min'] for bounds in optimization_variables.values()], dtype=float)
-            xu = np.array([bounds['max'] for bounds in optimization_variables.values()], dtype=float)
-            vtype = float
+            # Integer-encode float variables with 2-dec precision (scale = 100)
+            self._precision_scale = 100
+            mins = [bounds['min'] for bounds in optimization_variables.values()]
+            maxs = [bounds['max'] for bounds in optimization_variables.values()]
+            xl = np.rint(np.array(mins, dtype=float) * self._precision_scale).astype(int)
+            xu = np.rint(np.array(maxs, dtype=float) * self._precision_scale).astype(int)
+            vtype = int
         else:
             xl = np.zeros(n_var, dtype=int)
             xu = np.zeros(n_var, dtype=int)
@@ -332,7 +347,13 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
     def _evaluate(self, x, out, *args, **kwargs):
         try:
-            params = get_params(self.optimization_type, x, self.optimization_variables)
+            # Decode integer-encoded shading variables back to 2-dec floats for params
+            if self.optimization_type in ('shading', 'shading_wwr'):
+                x_decoded = (np.asarray(x, dtype=float) / float(getattr(self, '_precision_scale', 1))).tolist()
+            else:
+                x_decoded = x
+
+            params = get_params(self.optimization_type, x_decoded, self.optimization_variables)
             combination_key = make_cache_key(params)
 
             # Flag for shading_wwr; populate_with_cache now returns 3 objectives already
@@ -355,6 +376,13 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 results = generate_dummy_data(params, self.optimization_type, self.overheating_criterion)
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
+                
+                params['external_wall'] = 'R41 - Wall'
+                params['roof'] = 'R70 - Roof'
+                params['infiltration_ach'] = 2
+                params['wall_solar_absorptance'] = 0.45
+                params['roof_solar_absorptance'] = 0.7
+                
                 output_dir = run_simulation(
                     idf_path="BEMs/Building_SW_Shading_Renamed - Copy.idf",
                     weather_path=self.weather_file,
@@ -389,6 +417,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 lr, br, max_overheating_hours, total_area = 1000.0, 1000.0, 0.0, 1000.0
 
             if self.shared_cache is not None:
+                feasible = self._is_feasible(lr, br) if self.constrained_analysis else True
                 set_in_cache(
                     self.shared_cache,
                     combination_key,
@@ -399,6 +428,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     max_living_room_overheating=lr,
                     max_bedroom_overheating=br,
                     total_shading_area=total_area,
+                    feasible=feasible,
                 )
 
             # Set outputs directly
@@ -408,14 +438,14 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 f_wwr_w = -float(params.get('wwr_west') or 0.0)
                 out['F'] = [tedi_with_penalty, f_wwr_s, f_wwr_w]
                 if self.constrained_analysis:
-                    out['G'] = [lr - 110, br - 32]
+                    out['G'] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
                 return
 
             if not self.constrained_analysis:
                 out["F"] = [tedi_with_penalty, overheating]
                 return
             out["F"] = [tedi_with_penalty]
-            out["G"] = [lr - 110, br - 32]
+            out["G"] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
             return
             
         except Exception as _:
@@ -426,6 +456,18 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             if not self.constrained_analysis:
                 return
             out["G"] = [1000.0, 1000.0]
+
+    def _is_feasible(self, lr: float, br: float) -> bool:
+        """Return True if solution respects overheating constraints.
+
+        Defaults to True on error to avoid discarding results.
+        """
+        try:
+            lr_v = float(lr or 0.0)
+            br_v = float(br or 0.0)
+            return (lr_v <= LR_OVERHEATING_MAX_HRS) and (br_v <= BR_OVERHEATING_MAX_HRS)
+        except Exception:
+            return True
 
 def create_runner(num_workers: int) -> Tuple[StarmapParallelization, Optional[object]]:
     if num_workers > 1:
@@ -443,16 +485,21 @@ def cleanup_pool(pool):
         pool.join()
         print("Closed multiprocessing pool")
 
-def create_algorithm(optimization_type, population_size=None, crossover_prob=None, mutation_prob=None) -> NSGA2:
-    vtype = float if optimization_type in ('shading', 'shading_wwr') else int
+def create_algorithm(
+    optimization_type, 
+    population_size=None, 
+    crossover_prob=None, 
+    mutation_prob=None
+) -> NSGA2:
+    # Envelope uses integer categories; shading now uses integer-encoded floats (scale=100)
     repair = RoundingRepair() if optimization_type == 'envelope' else None
-    
+
     args = {
         'pop_size': population_size or 50,
-        'sampling': FloatRandomSampling() if optimization_type in ('shading', 'shading_wwr') else IntegerRandomSampling(),
-        'crossover': SBX(prob=crossover_prob or 0.5, eta=5, vtype=vtype, repair=repair),
-        'mutation': PM(prob=mutation_prob or 0.125, eta=5, vtype=vtype, repair=repair),
+        'sampling': IntegerRandomSampling(),
+        'crossover': SBX(prob=crossover_prob or 0.5, eta=5, vtype=int, repair=repair),
+        'mutation': PM(prob=mutation_prob or 0.125, eta=5, vtype=int, repair=repair),
         'eliminate_duplicates': True,
     }
-    
+
     return NSGA2(**args)
