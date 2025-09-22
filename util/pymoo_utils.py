@@ -9,21 +9,49 @@ based on the chosen optimization type (envelope or shading).
 
 
 from constants.shading_variables import SHADING_VARIABLE_BOUNDS
+from util.data_utils import load_optimization_variables
 def initialize_envelope_optimization_variables():
     """Initialize optimization variables for building envelope optimization.
+
+    Loads options from optimization_variables.json when available to ensure
+    construction names match the IDF. Falls back to built-in defaults.
     
     Returns:
         dict: Dictionary of envelope optimization variables and their options
     """
-    return {
-        'wwr_south': [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80],
-        'wwr_west': [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80],
-        'wwr_east': [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80],
-        'wwr_north': [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80],
-        'wall_construction': ['Wall_1', 'Wall_2', 'Wall_3', 'Wall_4', 'Wall_5'],
-        'roof_construction': ['Roof_1', 'Roof_2', 'Roof_3', 'Roof_4', 'Roof_5'],
-        'window_construction': ['Window_1', 'Window_2', 'Window_3', 'Window_4', 'Window_5']
-    }
+    cfg = load_optimization_variables()
+    vars: dict = {}
+
+    # WWR lists (coerce to ints to keep discrete percent options)
+    for k in ['wwr_south', 'wwr_west', 'wwr_east', 'wwr_north']:
+        values = cfg.get(k)
+        if not isinstance(values, (list, tuple)) or not values:
+            raise ValueError("Missing or invalid '%s' in optimization_variables.json" % k)
+        coerced = []
+        for v in values:
+            coerced.append(int(round(float(v))))
+        vars[k] = coerced
+
+    # Map construction option lists from JSON to expected keys
+    wall_opts = cfg.get('external_wall') or cfg.get('wall_construction')
+    roof_opts = cfg.get('roof') or cfg.get('roof_construction')
+    window_opts = cfg.get('window') or cfg.get('window_construction')
+    if not wall_opts or not roof_opts or not window_opts:
+        raise ValueError('Missing construction lists in optimization_variables.json')
+    vars['wall_construction'] = list(wall_opts)
+    vars['roof_construction'] = list(roof_opts)
+    vars['window_construction'] = list(window_opts)
+
+    return vars
+
+
+def initialize_shading_optimization_variables():
+    """Initialize shading optimization variable bounds.
+
+    Returns a shallow copy of SHADING_VARIABLE_BOUNDS to avoid callers
+    mutating the module-level constant.
+    """
+    return dict(SHADING_VARIABLE_BOUNDS)
 
 
 def get_optimization_variables(optimization_type):

@@ -137,13 +137,23 @@ def test_get_params_envelope_maps_correctly_and_duplicates():
         1,  # window_construction -> 'Window_2'
     ]
     params = get_params('envelope', x, vars)
-    assert math.isclose(params['wwr_south'], 0.30)
-    assert math.isclose(params['wwr_west'], 0.20)
-    assert math.isclose(params['wwr_east'], 0.40)
-    assert math.isclose(params['wwr_north'], 0.25)
-    assert params['wall_construction'].startswith('Wall_')
-    assert params['roof_construction'].startswith('Roof_')
-    assert params['window_construction'].startswith('Window_')
+    # Expect decimals derived from configured percent lists
+    assert math.isclose(
+        params['wwr_south'], float(vars['wwr_south'][x[0]]) / 100.0
+    )
+    assert math.isclose(
+        params['wwr_west'], float(vars['wwr_west'][x[1]]) / 100.0
+    )
+    assert math.isclose(
+        params['wwr_east'], float(vars['wwr_east'][x[2]]) / 100.0
+    )
+    assert math.isclose(
+        params['wwr_north'], float(vars['wwr_north'][x[3]]) / 100.0
+    )
+    # Construction names should match configured lists
+    assert params['wall_construction'] == vars['wall_construction'][x[4]]
+    assert params['roof_construction'] == vars['roof_construction'][x[5]]
+    assert params['window_construction'] == vars['window_construction'][x[6]]
     # Duplicated keys exist
     assert params['external_wall'] == params['wall_construction']
     assert params['roof'] == params['roof_construction']
