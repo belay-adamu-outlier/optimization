@@ -110,7 +110,7 @@ class EvaluationCallback(Callback):
                 self.constrained_analysis, self.overheating_criterion
             )
         else:
-            self.fig, self.ax, self.scatter_all, self.scatter_pareto = initialize_envelope_optimization_plot(
+            self.fig, self.axes, self.scatter_all, self.scatter_pareto = initialize_envelope_optimization_plot(
                 self.constrained_analysis, self.overheating_criterion
             )
 
@@ -166,7 +166,7 @@ class EvaluationCallback(Callback):
                 self.solutions_by_key,
                 generation=self.generation,
                 fig=self.fig,
-                ax=self.ax,
+                axes=self.axes,
                 scatter_all=self.scatter_all,
                 scatter_pareto=self.scatter_pareto,
                 constrained_analysis=self.constrained_analysis,

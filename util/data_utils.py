@@ -696,126 +696,109 @@ def initialize_plots():
 
 def initialize_envelope_optimization_plot(constrained_analysis=False, overheating_criterion='ASHRAE'):
     """
-    Initialize plots specifically for building envelope optimization.
-    
-    Args:
-        constrained_analysis (bool): Whether this is a constrained optimization
-        overheating_criterion (str): Either 'ASHRAE' or 'CIBSE59'
-    
-    Returns:
-        tuple: (fig, ax, scatter_all, scatter_pareto)
+    Initialize envelope plots with two subplots:
+    - Left: TEDI vs Max Bedroom Overheating
+    - Right: TEDI vs Max Living Room Overheating
     """
-    # Create main figure for envelope optimization
-    fig = plt.figure('Building Envelope Optimization', figsize=(10, 8))
-    fig.clear()
-    
-    # Create main axes for the Pareto front plot
-    ax = fig.add_subplot(111)
-    
-    # Set labels and title based on overheating criterion
-    if constrained_analysis:
-        if overheating_criterion.upper() == 'CIBSE59':
-            ax.set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
-            ax.set_ylabel('Max Overheating Hours')
-            ax.set_title('Building Envelope Optimization - CIBSE59 Constrained')
-        else:
-            ax.set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
-            ax.set_ylabel('Max Overheating Hours')
-            ax.set_title('Building Envelope Optimization - ASHRAE Constrained')
-    else:
-        ax.set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
-        ax.set_ylabel('Average Overheating Hours')
-        ax.set_title('Building Envelope Optimization - Multi-Objective')
-    
-    ax.grid(True, alpha=0.3)
-    # Let matplotlib auto-scale based on actual data
-    
-    # Create scatter plots for all solutions and Pareto optimal solutions
-    scatter_all = ax.scatter([], [], c='blue', alpha=0.6, s=30, label='All Solutions')
-    scatter_pareto = ax.scatter([], [], c='red', s=50, marker='*', label='Pareto Optimal')
-    
-    ax.legend()
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+    fig.suptitle('Building Envelope Optimization', fontsize=14)
+
+    # Max Bedroom Overheating
+    axes[0].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[0].set_ylabel('Max Bedroom Overheating (hours)')
+    axes[0].set_title('TEDI vs Max Bedroom Overheating')
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        axes[0].axhline(y=32, color='r', linestyle='--', label='Constraint (32h)')
+        axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    # Max Living Room Overheating
+    axes[1].set_xlabel('Thermal Energy Demand Intensity (kWh/m²)')
+    axes[1].set_ylabel('Max Living Room Overheating (hours)')
+    axes[1].set_title('TEDI vs Max Living Room Overheating')
+    if constrained_analysis and overheating_criterion.upper() == 'CIBSE59':
+        axes[1].axhline(y=110, color='r', linestyle='--', label='Constraint (110h)')
+        axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    scatter_all = [
+        axes[0].scatter([], [], c='blue', alpha=0.6, s=30, label='All Solutions'),
+        axes[1].scatter([], [], c='blue', alpha=0.6, s=30, label='All Solutions')
+    ]
+    scatter_pareto = [
+        axes[0].scatter([], [], c='red', s=50, marker='*', label='Pareto Optimal'),
+        axes[1].scatter([], [], c='red', s=50, marker='*', label='Pareto Optimal')
+    ]
+
+    for ax in axes:
+        ax.legend()
     fig.tight_layout()
-    
-    return fig, ax, scatter_all, scatter_pareto
+
+    return fig, axes, scatter_all, scatter_pareto
 
 
 def update_envelope_optimization_plot(
     solutions_by_key, 
     generation, 
     fig, 
-    ax, 
+    axes, 
     scatter_all, 
     scatter_pareto, 
     constrained_analysis=False, 
     overheating_criterion='ASHRAE'
 ):
-    """
-    Update the envelope optimization plot with new solutions.
-    
-    Args:
-        solutions_by_key (dict): Dictionary of solutions
-        generation (int): Current generation number
-        fig: Matplotlib figure
-        ax: Matplotlib axes
-        scatter_all: Scatter plot for all solutions
-        scatter_pareto: Scatter plot for Pareto optimal solutions
-        constrained_analysis (bool): Whether this is constrained optimization
-        overheating_criterion (str): Either 'ASHRAE' or 'CIBSE59'
-    """
+    """Update envelope plots (TEDI vs Max BR, TEDI vs Max LR)."""
     if not solutions_by_key:
         return
-    
-    # Extract objective values
-    tedi_values = []
-    overheating_values = []
-    pareto_tedi = []
-    pareto_overheating = []
-    
+
+    # Extract values
+    tedi_vals, br_vals, lr_vals = [], [], []
+    tedi_p, br_p, lr_p = [], [], []
+
     for solution in solutions_by_key.values():
-        tedi = solution.get('thermal_energy_demand_intensity', 0)
-        overheating = solution.get('average_overheating_hours', 0)
-        
-        if tedi is not None and overheating is not None:
-            tedi_values.append(tedi)
-            overheating_values.append(overheating)
-            
-            # Check if this is Pareto optimal
-            if solution.get('pareto_optimal', False):
-                pareto_tedi.append(tedi)
-                pareto_overheating.append(overheating)
-    
-    if tedi_values and overheating_values:
-        # Update scatter plots
-        scatter_all.set_offsets(np.column_stack([tedi_values, overheating_values]))
-        
-        if pareto_tedi and pareto_overheating:
-            scatter_pareto.set_offsets(np.column_stack([pareto_tedi, pareto_overheating]))
-        
-        # Auto-adjust limits
-        ax.relim()
-        ax.autoscale_view()
-        
-        # Manually set reasonable limits if auto-scaling fails
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        
-        if abs(xlim[0]) < 0.1 and abs(xlim[1]) < 0.1:  # If limits are around 0
-            tedi_margin = (max(tedi_values) - min(tedi_values)) * 0.1
-            ax.set_xlim(min(tedi_values) - tedi_margin, max(tedi_values) + tedi_margin)
-        
-        if abs(ylim[0]) < 0.1 and abs(ylim[1]) < 0.1:  # If limits are around 0
-            overheating_margin = (max(overheating_values) - min(overheating_values)) * 0.1
-            ax.set_ylim(min(overheating_values) - overheating_margin, max(overheating_values) + overheating_margin)
-        
-        # Update title with generation info
-        current_title = ax.get_title()
-        if 'Generation' not in current_title:
-            ax.set_title(f'{current_title} - Generation {generation}')
-        
-        # Force redraw
-        fig.canvas.draw()
-        fig.canvas.flush_events()
+        tedi = solution.get('thermal_energy_demand_intensity', 0) or 0
+        br = solution.get('max_bedroom_overheating', 0) or 0
+        lr = solution.get('max_living_room_overheating', 0) or 0
+        tedi_vals.append(tedi)
+        br_vals.append(br)
+        lr_vals.append(lr)
+        if solution.get('pareto_optimal', False):
+            tedi_p.append(tedi)
+            br_p.append(br)
+            lr_p.append(lr)
+
+    if not tedi_vals:
+        return
+
+    # Left: BR
+    scatter_all[0].set_offsets(np.column_stack([tedi_vals, br_vals]))
+    if tedi_p:
+        scatter_pareto[0].set_offsets(np.column_stack([tedi_p, br_p]))
+    axes[0].relim()
+    axes[0].autoscale_view()
+    xmax = max(tedi_vals)
+    xm = max(0.1, abs(xmax) * 0.1)
+    axes[0].set_xlim(0.0, xmax + xm)
+    ymax = max(br_vals)
+    ym = max(0.1, abs(ymax) * 0.1)
+    axes[0].set_ylim(0.0, ymax + ym)
+
+    # Right: LR
+    scatter_all[1].set_offsets(np.column_stack([tedi_vals, lr_vals]))
+    if tedi_p:
+        scatter_pareto[1].set_offsets(np.column_stack([tedi_p, lr_p]))
+    axes[1].relim()
+    axes[1].autoscale_view()
+    xmax = max(tedi_vals)
+    xm = max(0.1, abs(xmax) * 0.1)
+    axes[1].set_xlim(0.0, xmax + xm)
+    ymax = max(lr_vals)
+    ym = max(0.1, abs(ymax) * 0.1)
+    axes[1].set_ylim(0.0, ymax + ym)
+
+    fig.suptitle(f'Building Envelope Optimization - Generation {generation}', fontsize=14)
+    fig.canvas.draw()
+    fig.canvas.flush_events()
 
 
 def plot_shading_heat_map(schedule_flat, active_elements=None, fig=None, axes=None):
