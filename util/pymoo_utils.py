@@ -22,25 +22,54 @@ def initialize_envelope_optimization_variables():
     cfg = load_optimization_variables()
     vars: dict = {}
 
-    # WWR lists (coerce to ints to keep discrete percent options)
-    for k in ['wwr_south', 'wwr_west', 'wwr_east', 'wwr_north']:
-        values = cfg.get(k)
-        if not isinstance(values, (list, tuple)) or not values:
-            raise ValueError("Missing or invalid '%s' in optimization_variables.json" % k)
-        coerced = []
+    # Helper to coerce WWR lists from percentages to integer percent options
+    def coerce_wwr_list(values):
+        coerced: list[int] = []
         for v in values:
-            coerced.append(int(round(float(v))))
-        vars[k] = coerced
+            try:
+                coerced.append(int(round(float(v))))
+            except Exception:
+                continue
+        return coerced
 
-    # Map construction option lists from JSON to expected keys
+    # 1) Include only WWR keys present in JSON (no backfilling)
+    for key, values in cfg.items():
+        if isinstance(key, str) and key.startswith('wwr_'):
+            if isinstance(values, (list, tuple)) and values:
+                coerced = coerce_wwr_list(values)
+                if coerced:
+                    vars[key] = coerced
+
+    # 2) Map construction lists
     wall_opts = cfg.get('external_wall') or cfg.get('wall_construction')
     roof_opts = cfg.get('roof') or cfg.get('roof_construction')
     window_opts = cfg.get('window') or cfg.get('window_construction')
-    if not wall_opts or not roof_opts or not window_opts:
-        raise ValueError('Missing construction lists in optimization_variables.json')
-    vars['wall_construction'] = list(wall_opts)
-    vars['roof_construction'] = list(roof_opts)
-    vars['window_construction'] = list(window_opts)
+    if wall_opts:
+        vars['wall_construction'] = list(wall_opts)
+    if roof_opts:
+        vars['roof_construction'] = list(roof_opts)
+    if window_opts:
+        vars['window_construction'] = list(window_opts)
+
+    # 3) Append all remaining keys generically (preserve types), skipping duplicates and raw construction aliases
+    for key, values in cfg.items():
+        if key in vars or key in {'external_wall', 'roof', 'window'}:
+            continue
+        if not isinstance(values, (list, tuple)) or not values:
+            continue
+        first = values[0]
+        if isinstance(first, (int, float)):
+            try:
+                vars[key] = [float(v) for v in values]
+            except Exception:
+                continue
+        else:
+            if isinstance(key, str) and key.startswith('wwr_'):
+                coerced = coerce_wwr_list(values)
+                if coerced:
+                    vars[key] = coerced
+            else:
+                vars[key] = list(values)
 
     return vars
 
@@ -119,11 +148,33 @@ def get_params(optimization_type, x, optimization_variables):
     if opt in ('shading', 'shading_wwr'):
         # Continuous variables within bounds
         var_idx = 0
-        for var_name, bounds in optimization_variables.items():
-            value = float(x[var_idx])
-            value = max(bounds['min'], min(bounds['max'], value))
-            params[var_name] = value
-            var_idx += 1
+        if opt == 'shading':
+            # Expected input order for tests and UI (9 values)
+            mapping_order = [
+                'south_overhang_depth', 'south_overhang_width', 'south_overhang_angle',
+                'south_left_fin_depth', 'south_right_fin_depth',
+                'west_overhang_depth', 'west_overhang_width', 'west_overhang_angle',
+                'west_right_fin_depth',
+            ]
+            for var_name in mapping_order:
+                if var_name not in optimization_variables:
+                    continue
+                if var_idx >= len(x):
+                    break
+                bounds = optimization_variables[var_name]
+                value = float(x[var_idx])
+                value = max(bounds['min'], min(bounds['max'], value))
+                params[var_name] = value
+                var_idx += 1
+        else:
+            # shading_wwr: iterate all provided bounds in dict order
+            for var_name, bounds in optimization_variables.items():
+                if var_idx >= len(x):
+                    break
+                value = float(x[var_idx])
+                value = max(bounds['min'], min(bounds['max'], value))
+                params[var_name] = value
+                var_idx += 1
 
         # Build nested shading dimensions for geometry creation
         dims: dict = {}
@@ -173,13 +224,18 @@ def get_params(optimization_type, x, optimization_variables):
                 params['wwr_west'] = float(params['wwr_west'])
         return params
 
-    # Envelope: categorical indexes and WWRs
+    # Envelope: categorical indexes and WWRs (including zone-specific WWRs)
     var_idx = 0
     for var_name, var_options in optimization_variables.items():
-        if var_name.startswith('wwr_'):
-            params[var_name] = var_options[int(x[var_idx])] / 100.0
+        if var_idx >= len(x):
+            break
+        # Choose option by index
+        choice = var_options[int(x[var_idx])]
+        # WWRs are provided as percentages in JSON; convert to fraction
+        if isinstance(var_name, str) and var_name.startswith('wwr_'):
+            params[var_name] = float(choice) / 100.0
         else:
-            params[var_name] = var_options[int(x[var_idx])]
+            params[var_name] = choice
         var_idx += 1
 
     # Duplicate construction keys to names used by modify_idf

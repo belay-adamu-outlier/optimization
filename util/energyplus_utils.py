@@ -974,13 +974,7 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
     return chosen
 
 
-def apply_wwr_to_windows(
-    idf, 
-    wwr_east=None, 
-    wwr_west=None, 
-    wwr_north=None, 
-    wwr_south=None
-):
+def apply_wwr_to_windows(idf, params: dict | None = None):
     fenestrations = idf.idfobjects['FENESTRATIONSURFACE:DETAILED']
     for fenestration in fenestrations:
         parent_wall_name = fenestration.Building_Surface_Name
@@ -1011,27 +1005,51 @@ def apply_wwr_to_windows(
         dy = v1[1] - v0[1]
         azimuth = np.degrees(np.arctan2(dy, dx)) % 360
 
-        # Prefer name-based orientation first
-        wwr = None
+        # Determine orientation string for zone-specific lookup
+        orientation_str = None
         if 'south' in parent_wall_name_l:
-            wwr = wwr_south
+            orientation_str = 'south'
         elif 'west' in parent_wall_name_l:
-            wwr = wwr_west
+            orientation_str = 'west'
         elif 'east' in parent_wall_name_l:
-            wwr = wwr_east
+            orientation_str = 'east'
         elif 'north' in parent_wall_name_l:
-            wwr = wwr_north
-        
+            orientation_str = 'north'
+
         # Fallback to azimuth-based orientation if name not informative
-        if wwr is None:
+        if orientation_str is None:
             if 45 <= azimuth < 135:
-                wwr = wwr_east
+                orientation_str = 'east'
             elif 135 <= azimuth < 225:
-                wwr = wwr_north
+                orientation_str = 'north'
             elif 225 <= azimuth < 315:
-                wwr = wwr_west
+                orientation_str = 'west'
             else:
-                wwr = wwr_south
+                orientation_str = 'south'
+
+        # Zone-specific precedence using parent wall zone name
+        wwr = None
+        if params is not None and orientation_str is not None:
+            try:
+                zone_name = str(getattr(parent_wall, 'Zone_Name', '') or '')
+            except Exception:
+                zone_name = ''
+            zn = zone_name.upper()
+            zone_type = None
+            if 'BR' in zn:
+                zone_type = 'br'
+            elif 'LR' in zn:
+                zone_type = 'lr'
+
+            if zone_type is not None:
+                key = f"wwr_{orientation_str}_{zone_type}"
+                z_wwr = params.get(key)
+                if z_wwr is not None:
+                    wwr = z_wwr
+
+        # Orientation-level fallback from params
+        if wwr is None and params is not None and orientation_str is not None:
+            wwr = params.get(f'wwr_{orientation_str}')
 
         # Skip if no WWR provided for this orientation
         if wwr is None:
@@ -1125,15 +1143,9 @@ def modify_idf(idf, parameters, save=False, save_path=None):
     if 'infiltration_ach' in parameters:
         apply_infiltration_to_zones(idf, parameters['infiltration_ach'])
 
-    # Apply WWR for any orientations provided
-    if any(key in parameters for key in ['wwr_east', 'wwr_west', 'wwr_north', 'wwr_south']):
-        apply_wwr_to_windows(
-            idf,
-            parameters.get('wwr_east'),
-            parameters.get('wwr_west'),
-            parameters.get('wwr_north'),
-            parameters.get('wwr_south')
-        )
+    # Apply WWRs if any 'wwr_*' key is present (handles general and BR/LR-specific)
+    if any(isinstance(k, str) and k.startswith('wwr_') for k in parameters.keys()):
+        apply_wwr_to_windows(idf, parameters)
 
     # Apply albedo
     if 'wall_solar_absorptance' in parameters or 'roof_solar_absorptance' in parameters:

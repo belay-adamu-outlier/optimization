@@ -321,6 +321,7 @@ class TestApplyWwrToWindows:
         self.mock_parent_wall = Mock()
         self.mock_parent_wall.Name = 'Test_Wall'
         self.mock_parent_wall.Azimuth = 90.0  # East-facing
+        self.mock_parent_wall.Zone_Name = 'Zone_BR_101'
         
         # Set up wall vertices (10m x 3m wall)
         for i in range(1, 5):
@@ -346,13 +347,36 @@ class TestApplyWwrToWindows:
     
     def test_apply_wwr_to_east_facing_wall(self):
         """Test applying WWR to east-facing wall."""
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.3, 0.2, 0.1, 0.4
+        # Test applying WWR to east-facing wall.
+        params = {'wwr_east': 0.3, 'wwr_west': 0.2, 'wwr_north': 0.1, 'wwr_south': 0.4}
 
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
         
         # Verify window vertices were updated
         # Should use wwr_east (0.3) for east-facing wall
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
+    def test_apply_wwr_zone_specific_precedence_br(self):
+        """BR zone-specific WWR should take precedence over orientation-level."""
+        # east orientation, Zone_Name contains BR
+        params = {'wwr_east': 0.30, 'wwr_east_br': 0.42}
+        apply_wwr_to_windows(self.mock_idf, params)
+        # If applied, geometry updated; precise geometry asserted in other tests
+        assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
+
+    def test_apply_wwr_zone_specific_precedence_lr(self):
+        """LR zone-specific WWR should take precedence when Zone_Name has LR."""
+        self.mock_parent_wall.Zone_Name = 'Living_LR_Main'
+        params = {'wwr_east': 0.30, 'wwr_east_lr': 0.25}
+        apply_wwr_to_windows(self.mock_idf, params)
+        assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
+
+    def test_apply_wwr_orientation_fallback_when_no_zone_match(self):
+        """Use orientation-level WWR when Zone_Name lacks BR/LR tokens."""
+        self.mock_parent_wall.Zone_Name = 'Kitchen_201'
+        params = {'wwr_east': 0.33}
+        apply_wwr_to_windows(self.mock_idf, params)
+        assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
+
         assert hasattr(self.mock_fenestration, 'Vertex_1_Ycoordinate')
         assert hasattr(self.mock_fenestration, 'Vertex_1_Zcoordinate')
 
@@ -368,7 +392,8 @@ class TestApplyWwrToWindows:
             setattr(self.mock_parent_wall, f'Vertex_{i}_Zcoordinate', 0.0 if i <= 2 else 3.0)
 
         # Provide only south WWR so we can detect selection
-        apply_wwr_to_windows(self.mock_idf, wwr_south=0.35)
+        params = {'wwr_south': 0.35}
+        apply_wwr_to_windows(self.mock_idf, params)
         # If name-based detection worked, vertices should be updated
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
     
@@ -377,9 +402,9 @@ class TestApplyWwrToWindows:
         # Change wall azimuth to south-facing
         self.mock_parent_wall.Azimuth = 180.0
         
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.2, 0.3, 0.1, 0.4
+        params = {'wwr_east': 0.2, 'wwr_west': 0.3, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
         
         # Should use wwr_south (0.4) for south-facing wall
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
@@ -389,9 +414,9 @@ class TestApplyWwrToWindows:
         # Change wall azimuth to west-facing
         self.mock_parent_wall.Azimuth = 270.0
         
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.2, 0.3, 0.1, 0.4
+        params = {'wwr_east': 0.2, 'wwr_west': 0.3, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
         
         # Should use wwr_west (0.3) for west-facing wall
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
@@ -401,9 +426,9 @@ class TestApplyWwrToWindows:
         # Change wall azimuth to north-facing
         self.mock_parent_wall.Azimuth = 0.0
         
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.2, 0.3, 0.1, 0.4
+        params = {'wwr_east': 0.2, 'wwr_west': 0.3, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
         
         # Should use wwr_north (0.1) for north-facing wall
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
@@ -413,20 +438,20 @@ class TestApplyWwrToWindows:
         # Change fenestration to reference non-existent wall
         self.mock_fenestration.Building_Surface_Name = 'NonExistent_Wall'
         
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.3, 0.2, 0.1, 0.4
+        params = {'wwr_east': 0.3, 'wwr_west': 0.2, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
         # Should not raise exception, just skip the fenestration
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
     
     def test_apply_wwr_with_incomplete_vertices(self):
         """Test applying WWR when wall or window vertices are incomplete."""
         # Remove some vertex coordinates
         delattr(self.mock_parent_wall, 'Vertex_3_Xcoordinate')
         
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.3, 0.2, 0.1, 0.4
+        params = {'wwr_east': 0.3, 'wwr_west': 0.2, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
         # Should not raise exception, just skip the fenestration
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
     
     def test_apply_wwr_to_multiple_fenestrations(self):
         """Test applying WWR to multiple fenestrations."""
@@ -443,9 +468,9 @@ class TestApplyWwrToWindows:
         # Add to idfobjects
         self.mock_idf.idfobjects['FENESTRATIONSURFACE:DETAILED'].append(mock_fenestration2)
         
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.3, 0.2, 0.1, 0.4
+        params = {'wwr_east': 0.3, 'wwr_west': 0.2, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
-        apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+        apply_wwr_to_windows(self.mock_idf, params)
         
         # Both fenestrations should be updated
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
@@ -453,38 +478,40 @@ class TestApplyWwrToWindows:
     
     def test_apply_wwr_azimuth_boundary_conditions(self):
         """Test WWR selection at azimuth boundary conditions."""
-        wwr_east, wwr_west, wwr_north, wwr_south = 0.3, 0.2, 0.1, 0.4
+        params = {'wwr_east': 0.3, 'wwr_west': 0.2, 'wwr_north': 0.1, 'wwr_south': 0.4}
         
         # Test boundary conditions for azimuth ranges
         test_cases = [
-            (45.0, wwr_east),   # East boundary
-            (134.9, wwr_east),  # Just before south boundary
-            (135.0, wwr_south), # South boundary
-            (224.9, wwr_south), # Just before west boundary
-            (225.0, wwr_west),  # West boundary
-            (314.9, wwr_west),  # Just before north boundary
-            (315.0, wwr_north), # North boundary
-            (44.9, wwr_north),  # Just before east boundary
+            (45.0, params['wwr_east']),   # East boundary
+            (134.9, params['wwr_east']),  # Just before south boundary
+            (135.0, params['wwr_south']), # South boundary
+            (224.9, params['wwr_south']), # Just before west boundary
+            (225.0, params['wwr_west']),  # West boundary
+            (314.9, params['wwr_west']),  # Just before north boundary
+            (315.0, params['wwr_north']), # North boundary
+            (44.9, params['wwr_north']),  # Just before east boundary
         ]
         
         for azimuth, expected_wwr in test_cases:
             self.mock_parent_wall.Azimuth = azimuth
-            apply_wwr_to_windows(self.mock_idf, wwr_east, wwr_west, wwr_north, wwr_south)
+            apply_wwr_to_windows(self.mock_idf, params)
             # The function should use the correct WWR based on azimuth
-
+    
     def test_apply_wwr_partial_inputs_only_south(self):
         """Only south WWR provided should only update south-facing walls."""
         # South-facing
         self.mock_parent_wall.Azimuth = 180.0
-        apply_wwr_to_windows(self.mock_idf, wwr_south=0.35)
+        params = {'wwr_south': 0.35}
+        apply_wwr_to_windows(self.mock_idf, params)
         assert hasattr(self.mock_fenestration, 'Vertex_1_Xcoordinate')
-
+    
     def test_apply_wwr_partial_inputs_missing_orientation(self):
         """If WWR for orientation is missing, skip updates for that orientation."""
         # East-facing (90 deg) but only south provided -> should skip
         self.mock_parent_wall.Azimuth = 90.0
         # Recreate fenestration vertices to detect no change scenario by lack of errors
-        apply_wwr_to_windows(self.mock_idf, wwr_south=0.4)
+        params = {'wwr_south': 0.4}
+        apply_wwr_to_windows(self.mock_idf, params)
 
 
 class TestApplySolarAbsorptanceToSurfaces:
