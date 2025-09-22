@@ -334,7 +334,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
         self.optimization_variables = optimization_variables
         self.shared_cache = shared_cache
-        self.weather_file = weather_file or "Vancouver - 2021 AMY.epw"
+        self.weather_file = weather_file or "BEMs/Vancouver - 2021 AMY.epw"
         self.optimization_type = optimization_type
         self.current_generation = 0
         self.constrained_analysis = constrained_analysis
@@ -384,7 +384,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 params['roof_solar_absorptance'] = 0.7
                 
                 output_dir = run_simulation(
-                    idf_path="BEMs/Building_SW_Shading_Renamed - Copy.idf",
+                    idf_path="BEMs/Building_SW_Shading_Renamed - No W BR WIN.idf",
                     weather_path=self.weather_file,
                     params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
