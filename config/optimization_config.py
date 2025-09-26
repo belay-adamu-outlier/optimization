@@ -178,7 +178,7 @@ class EvaluationCallback(Callback):
             self.solutions_by_generation,
             self.solutions_by_key,
             self.variable_names,
-            generation=None,
+            generation=self.generation,
             problem_type=self.optimization_type,
             constrained_analysis=self.constrained_analysis,
             overheating_criterion=self.overheating_criterion,
