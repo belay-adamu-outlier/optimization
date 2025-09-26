@@ -8,7 +8,7 @@ based on the chosen optimization type (envelope or shading).
 
 
 
-from constants.shading_variables import SHADING_VARIABLE_BOUNDS
+from constants.shading_variables import SHADING_VARIABLE_BOUNDS, SHADING_VARIABLE_KEYS
 from util.data_utils import load_optimization_variables
 def initialize_envelope_optimization_variables():
     """Initialize optimization variables for building envelope optimization.
@@ -149,13 +149,32 @@ def get_params(optimization_type, x, optimization_variables):
         # Continuous variables within bounds
         var_idx = 0
         if opt == 'shading':
-            # Expected input order for tests and UI (9 values)
-            mapping_order = [
-                'south_overhang_depth', 'south_overhang_width', 'south_overhang_angle',
-                'south_left_fin_depth', 'south_right_fin_depth',
-                'west_overhang_depth', 'west_overhang_width', 'west_overhang_angle',
-                'west_right_fin_depth',
-            ]
+            # Build mapping from declared keys, then include any extras in order
+            declared = list(SHADING_VARIABLE_KEYS) if isinstance(SHADING_VARIABLE_KEYS, list) else []
+            mapping_order = [k for k in declared if k in optimization_variables]
+
+            # Sensible inserts for optional keys not in declared list
+            for side in ['south', 'west']:
+                depth_key = f'{side}_overhang_depth'
+                angle_key = f'{side}_overhang_angle'
+                width_key = f'{side}_overhang_width'
+                left_ext_key = f'{side}_overhang_left_extension_pct'
+                # Insert width immediately after depth if present
+                if width_key in optimization_variables and width_key not in mapping_order:
+                    if depth_key in mapping_order:
+                        idx = mapping_order.index(depth_key) + 1
+                        mapping_order.insert(idx, width_key)
+                # Insert west left_extension_pct after angle if not declared
+                if left_ext_key in optimization_variables and left_ext_key not in mapping_order:
+                    if angle_key in mapping_order:
+                        idx = mapping_order.index(angle_key) + 1
+                        mapping_order.insert(idx, left_ext_key)
+
+            # Append any remaining keys in provided order
+            for k in optimization_variables.keys():
+                if k not in mapping_order:
+                    mapping_order.append(k)
+
             for var_name in mapping_order:
                 if var_name not in optimization_variables:
                     continue

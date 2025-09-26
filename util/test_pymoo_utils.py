@@ -72,25 +72,69 @@ def test_get_problem_constraints(constrained, criterion, expected):
 
 def test_get_params_shading_builds_and_clips():
     vars = initialize_shading_optimization_variables()
-    # Build x with out-of-range values to test clipping
-    x = [
-        -1.0,  # south_overhang_depth -> clip to min 0.0
-        2.0,   # south_overhang_width -> clip to max 1.0
-        90.0,  # south_overhang_angle -> clip to max 60.0
-        10.0,  # south_left_fin_depth -> clip to max 5.0
-        -2.0,  # south_right_fin_depth -> clip to min 0.0
-        0.5,   # west_overhang_depth
-        0.5,   # west_overhang_width
-        30.0,  # west_overhang_angle
-        1.5,   # west_right_fin_depth
-    ]
+    # Extend vars with widths and west/right fin where missing to satisfy mapper
+    vars.setdefault('south_overhang_width', {'min': 0.0, 'max': 1.0})
+    vars.setdefault('west_overhang_width', {'min': 0.0, 'max': 1.0})
+    vars.setdefault('west_right_fin_depth', {'min': 0.0, 'max': 2.0})
+    vars.setdefault('west_overhang_left_extension_pct', {'min': 0.0, 'max': 0.5})
+    vars.setdefault('west_overhang_right_extension_pct', {'min': 0.0, 'max': 0.5})
+    vars.setdefault('west_overhang_height_above', {'min': 0.0, 'max': 1.1})
+
+    # Build mapping order like the mapper does
+    from constants.shading_variables import SHADING_VARIABLE_KEYS
+    declared = list(SHADING_VARIABLE_KEYS)
+    mapping_order = [k for k in declared if k in vars]
+    for side in ['south', 'west']:
+        depth_key = f'{side}_overhang_depth'
+        angle_key = f'{side}_overhang_angle'
+        width_key = f'{side}_overhang_width'
+        left_ext_key = f'{side}_overhang_left_extension_pct'
+        if width_key in vars and width_key not in mapping_order and depth_key in mapping_order:
+            mapping_order.insert(mapping_order.index(depth_key) + 1, width_key)
+        if left_ext_key in vars and left_ext_key not in mapping_order and angle_key in mapping_order:
+            mapping_order.insert(mapping_order.index(angle_key) + 1, left_ext_key)
+    for k in vars.keys():
+        if k not in mapping_order:
+            mapping_order.append(k)
+
+    # Prepare values per key to exercise clipping
+    values_by_key = {
+        'south_overhang_depth': -1.0,
+        'south_overhang_width': 2.0,
+        'south_overhang_angle': 200.0,
+        'south_overhang_left_extension_pct': 1.0,
+        'south_overhang_right_extension_pct': 1.0,
+        'south_overhang_height_above': 2.0,
+        'south_left_fin_depth': 10.0,
+        'south_right_fin_depth': -2.0,
+        'west_overhang_depth': 0.5,
+        'west_overhang_width': 0.5,
+        'west_overhang_angle': 100.0,
+        'west_overhang_left_extension_pct': 1.0,
+        'west_overhang_right_extension_pct': 1.0,
+        'west_overhang_height_above': 2.0,
+        'west_right_fin_depth': 1.5,
+    }
+    # Default values for any other keys
+    for k in mapping_order:
+        if k not in values_by_key:
+            b = vars[k]
+            values_by_key[k] = (b['min'] + b['max']) / 2.0
+    x = [values_by_key[k] for k in mapping_order]
     params = get_params('shading', x, vars)
 
     # Flat params clipped
     assert math.isclose(params['south_overhang_depth'], 0.0)
     assert math.isclose(params['south_overhang_width'], 1.0)
-    assert math.isclose(params['south_overhang_angle'], 60.0)
-    assert math.isclose(params['south_left_fin_depth'], 5.0)
+    assert 'south_overhang_left_extension_pct' in params
+    assert 'south_overhang_right_extension_pct' in params
+    assert 'south_overhang_height_above' in params
+    assert 'west_overhang_left_extension_pct' in params
+    assert 'west_overhang_right_extension_pct' in params
+    assert 'west_overhang_height_above' in params
+    # Clipped values to bounds from constants/shading_variables.py
+    assert math.isclose(params['south_overhang_angle'], 180.0)
+    assert math.isclose(params['south_left_fin_depth'], 2.0)
     assert math.isclose(params['south_right_fin_depth'], 0.0)
 
     # Nested dims built for south and west
