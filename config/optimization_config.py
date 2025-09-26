@@ -380,11 +380,11 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
                 params['external_wall'] = 'R47 - Wall'
                 params['roof'] = 'R70 - Roof'
-                params['infiltration_ach'] = 1.74
-                params['wall_solar_absorptance'] = 0.45
-                params['roof_solar_absorptance'] = 0.7
+                params['infiltration_ach'] = 0.78
+                params['wall_solar_absorptance'] = 0.15
+                params['roof_solar_absorptance'] = 0.37
                 params['window'] = 'SageGlass Climatop Blue No Tint - 1008'
-                params['wwr_south'] = 0.29
+                params['wwr_south'] = 0.24
                 params['wwr_west'] = 0.29
                 
                 output_dir = run_simulation(
@@ -398,13 +398,13 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 results = analyze_simulation_results(
                     output_dir,
                     overheating_criterion=self.overheating_criterion,
-                    cleanup=False,
+                    cleanup=True,
                 )
 
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 overheating = results['average_overheating_hours'] or 0.0
-                tedi = district_heating / 2560
+                tedi = district_heating / 320.41
                 lr = results.get('max_living_room_overheating', 0.0) or 0.0
                 br = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
