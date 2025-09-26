@@ -377,8 +377,18 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
 
+
+                params['external_wall'] = 'R47 - Wall'
+                params['roof'] = 'R70 - Roof'
+                params['infiltration_ach'] = 1.26
+                params['wall_solar_absorptance'] = 0.55
+                params['roof_solar_absorptance'] = 0.48
+                params['window'] = 'SageGlass Climatop Classic SR2.0 No Tint - 1006'
+                params['wwr_south'] = 0.29
+                params['wwr_west'] = 0.29
+                
                 output_dir = run_simulation(
-                    idf_path="BEMs/Building.idf",
+                    idf_path="BEMs/Building_SW_Shading_Renamed - Copy.idf",
                     weather_path=self.weather_file,
                     params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
@@ -388,7 +398,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 results = analyze_simulation_results(
                     output_dir,
                     overheating_criterion=self.overheating_criterion,
-                    cleanup=True,
+                    cleanup=False,
                 )
 
             if results['success']:

@@ -32,20 +32,20 @@ SHADING_VARIABLE_KEYS = [
 SHADING_VARIABLE_BOUNDS = {
     'south_overhang_depth': {'min': 0.0, 'max': 2.0},
     # 'south_overhang_width': {'min': 0.0, 'max': 2.0},
-    'south_overhang_angle': {'min': 53, 'max': 180.0},
+    'south_overhang_angle': {'min': 90, 'max': 180.0},
     'south_left_fin_depth': {'min': 0.0, 'max': 2.0},
     'south_right_fin_depth': {'min': 0.0, 'max': 2.0},
     'south_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
     'south_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
     'south_overhang_height_above': {'min': 0.0, 'max': 1.1},
     
-    'west_overhang_depth': {'min': 0.0, 'max': 2.0},
+    'west_overhang_depth': {'min': 1.5, 'max': 1.52},
     # 'west_overhang_width': {'min': 0.0, 'max': 2.0},
-    'west_overhang_angle': {'min': 53, 'max': 180.0},
-    'west_right_fin_depth': {'min': 0.0, 'max': 2.0},
-    # 'west_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
-    'west_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
-    'west_overhang_height_above': {'min': 0.0, 'max': 1.1},
+    'west_overhang_angle': {'min': 178, 'max': 180.0},
+    # 'west_right_fin_depth': {'min': 0.0, 'max': 0.0},
+    # # 'west_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'west_overhang_right_extension_pct': {'min': 0.0, 'max': 0.0},
+    # 'west_overhang_height_above': {'min': 0.0, 'max': 0},
 }
 
 
