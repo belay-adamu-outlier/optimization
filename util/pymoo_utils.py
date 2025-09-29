@@ -99,7 +99,6 @@ def get_optimization_variables(optimization_type):
         merged = dict(SHADING_VARIABLE_BOUNDS)
         merged.update({
             'wwr_south': {'min': 0.2, 'max': 0.4},
-            'wwr_west': {'min': 0.01, 'max': 0.4},
         })
         return merged
     else:
