@@ -380,7 +380,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
 
                 params['external_wall'] = 'R47 - Wall'
                 params['roof'] = 'R63 - Roof'
-                params['infiltration_ach'] = 0.54
+                params['infiltration_ach'] = 1.76
                 params['wall_solar_absorptance'] = 0.45
                 params['roof_solar_absorptance'] = 0.37
                 params['window'] = 'SageGlass Climatop Blue No Tint - 1008'
