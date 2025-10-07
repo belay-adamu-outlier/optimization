@@ -1901,6 +1901,46 @@ def _create_fin_parametric(
     fin.Right_Depth = right_depth
 
 
+def identify_wall_orientation_by_vertices(surface) -> Optional[str]:
+    """Identify wall orientation by analyzing vertex coordinates.
+
+    EnergyPlus vertices are ordered counter-clockwise starting from the bottom left corner.
+    For North/South walls (constant Y): analyze X coordinate change between consecutive vertices
+    For East/West walls (constant X): analyze Y coordinate change between consecutive vertices
+
+    Args:
+        surface: Building surface object with vertex coordinates
+
+    Returns:
+        str: Orientation ('North', 'South', 'East', 'West') or None if cannot determine
+    """
+    vertices = []
+    for i in range(1, 5):
+        x = getattr(surface, f'Vertex_{i}_Xcoordinate', None)
+        y = getattr(surface, f'Vertex_{i}_Ycoordinate', None)
+        z = getattr(surface, f'Vertex_{i}_Zcoordinate', None)
+        if x is not None and y is not None and z is not None:
+            vertices.append((float(x), float(y), float(z)))
+
+    if len(vertices) != 4:
+        return None
+
+    y_coords = [v[1] for v in vertices]
+    x_coords = [v[0] for v in vertices]
+
+    if all(abs(y - y_coords[0]) < 1e-3 for y in y_coords):
+        x_change = vertices[1][0] - vertices[0][0]
+        if abs(x_change) > 1e-3:
+            return 'South' if x_change > 0 else 'North'
+
+    elif all(abs(x - x_coords[0]) < 1e-3 for x in x_coords):
+        y_change = vertices[1][1] - vertices[0][1]
+        if abs(y_change) > 1e-3:
+            return 'East' if y_change > 0 else 'West'
+
+    return None
+
+
 def create_shading_overhangs_and_fins_by_orientation(
     idf: IDF, dimensions: Optional[Dict[str, Any]]
 ):
@@ -1913,8 +1953,24 @@ def create_shading_overhangs_and_fins_by_orientation(
 
     fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
     for fen in fenestrations:
-        wall_name_l = str(getattr(fen, 'Building_Surface_Name', '')).lower()
-        # Collect fenestration vertices from object
+        parent_wall_name = getattr(fen, 'Building_Surface_Name', None)
+        parent_wall = None
+
+        for wall in idf.idfobjects.get('BUILDINGSURFACE:DETAILED', []):
+            if wall.Name == parent_wall_name:
+                parent_wall = wall
+                break
+
+        if parent_wall is None:
+            continue
+
+        orientation = identify_wall_orientation_by_vertices(parent_wall)
+
+        if orientation is None:
+            continue
+
+        orientation = orientation.lower()
+
         fen_vertices = []
         for i in range(1,5):
             x = getattr(fen, f'Vertex_{i}_Xcoordinate', None)
@@ -1925,36 +1981,33 @@ def create_shading_overhangs_and_fins_by_orientation(
         if not fen_vertices:
             continue
 
-        for orientation in ['south', 'west', 'east']:
-            if orientation not in wall_name_l:
-                continue
-            side_dims = dimensions.get(orientation, {}) or {}
+        if orientation not in dimensions:
+            continue
 
-            if isinstance(side_dims.get('overhang'), dict):
-                _create_overhang_parametric(
-                    idf,
-                    fen,
-                    fen_vertices,
-                    side_dims['overhang'],
-                    orientation,
-                )
+        side_dims = dimensions.get(orientation, {}) or {}
 
-            left = side_dims.get('left_fin') if isinstance(side_dims.get('left_fin'), dict) else None
-            right = side_dims.get('right_fin') if isinstance(side_dims.get('right_fin'), dict) else None
-            
-            if left or right:
-                _create_fin_parametric(
-                    idf, 
-                    fen, 
-                    left or {}, 
-                    right or {}, 
-                    orientation
-                )
+        if isinstance(side_dims.get('overhang'), dict):
+            _create_overhang_parametric(
+                idf,
+                fen,
+                fen_vertices,
+                side_dims['overhang'],
+                orientation,
+            )
+
+        left = side_dims.get('left_fin') if isinstance(side_dims.get('left_fin'), dict) else None
+        right = side_dims.get('right_fin') if isinstance(side_dims.get('right_fin'), dict) else None
+
+        if left or right:
+            _create_fin_parametric(
+                idf,
+                fen,
+                left or {},
+                right or {},
+                orientation
+            )
 
     return idf
-
-
-
 
 def _copy_idf_object(dst: IDF, obj: Any, key_hint: Optional[str] = None):
     """Copy an IDF object into dst. Fallback to creating new and copying attrs.
