@@ -867,31 +867,48 @@ def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
             infiltration.Design_Flow_Rate_Calculation_Method = 'AirChanges/Hour'
 
 
-def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimuth):
+def calculate_window_geometry(
+    vertices,
+    wwr,
+    wall_area,
+    sill_height,
+    wall_orientation
+):
     """
     Recompute window vertices from WWR using a fixed 1.5 m height.
 
     Uses window_area = wall_area * wwr. Sets height to 1.5 m and derives width
     from area/height. Preserves sill height and centers horizontally on the
-    wall's variable axis. The returned vertices follow the original winding.
+    wall's variable axis. Uses wall orientation to determine correct vertex ordering.
+
+    Args:
+        vertices: Original window vertex coordinates
+        wwr: Window-to-wall ratio
+        wall_area: Area of the parent wall
+        sill_height: Sill height of the window
+        wall_orientation: Wall orientation ('North', 'South', 'East', 'West')
+
+    Returns:
+        List of new vertex coordinates in CCW order
     """
     vertices = np.array(vertices)
-    wall_azimuth = wall_azimuth % 360
     # Axis-alignment check (restore original logic)
     x_vals = vertices[:, 0]
     y_vals = vertices[:, 1]
     if (not np.allclose(x_vals, x_vals[0])) and (not np.allclose(y_vals, y_vals[0])):
         raise ValueError("Window is not axis-aligned!")
-    
-    # Determine wall orientation: keep window coplanar with wall
-    # East/West walls: X is constant (YZ plane) → vary Y
-    # North/South walls: Y is constant (XZ plane) → vary X
-    if (45 <= wall_azimuth < 135) or (225 <= wall_azimuth < 315):
+
+    # Determine fixed axis based on wall orientation
+    # East/West walls: X is constant → vary Y
+    # North/South walls: Y is constant → vary X
+    if wall_orientation in ['East', 'West']:
         fixed_axis = 'x'
         var_vals = vertices[:, 1]
-    else:
+    elif wall_orientation in ['North', 'South']:
         fixed_axis = 'y'
         var_vals = vertices[:, 0]
+    else:
+        raise ValueError(f"Unknown wall orientation: {wall_orientation}")
     
     # Calculate center of the variable coordinate (for centering the window)
     center = (np.max(var_vals) + np.min(var_vals)) / 2
@@ -910,75 +927,50 @@ def calculate_window_geometry(vertices, wwr, wall_area, sill_height, wall_azimut
     new_var_min = center - new_width / 2
     new_var_max = center + new_width / 2
     
-    # Build rectangle candidates with desired sequence:
-    # Vertex 1: bottom-right, 2: bottom-left, 3: top-left, 4: top-right
-    if fixed_axis == 'x':
+    # Always use CCW ordering for outward normals
+    # Determine the correct "left" and "right" based on wall orientation
+
+    if fixed_axis == 'x':  # East/West walls (constant X)
         x_fixed = x_vals[0]
-        # Candidate A: right = new_var_max, left = new_var_min
-        candA = [
-            (x_fixed, new_var_max, new_z_min),  # BR
-            (x_fixed, new_var_min, new_z_min),  # BL
-            (x_fixed, new_var_min, new_z_max),  # TL
-            (x_fixed, new_var_max, new_z_max),  # TR
+        # If the original window spanned from low Y to high Y, that's the "left to right" direction
+        if vertices[0][1] < vertices[1][1]:  # Original v0 to v1: Y increases
+            # For east walls, Y should increase from left to right
+            left_y, right_y = new_var_min, new_var_max
+        else:  # Original v0 to v1: Y decreases
+            # For west walls, Y should decrease from left to right
+            left_y, right_y = new_var_max, new_var_min
+
+        # CCW order: bottom-left → bottom-right → top-right → top-left
+        return [
+            (x_fixed, left_y, new_z_min),  # Bottom-left
+            (x_fixed, right_y, new_z_min),  # Bottom-right
+            (x_fixed, right_y, new_z_max),  # Top-right
+            (x_fixed, left_y, new_z_max),  # Top-left
         ]
-        # Candidate B: right = new_var_min, left = new_var_max
-        candB = [
-            (x_fixed, new_var_min, new_z_min),
-            (x_fixed, new_var_max, new_z_min),
-            (x_fixed, new_var_max, new_z_max),
-            (x_fixed, new_var_min, new_z_max),
-        ]
-    else:
+
+    else:  # North/South walls (constant Y)
         y_fixed = y_vals[0]
-        # Candidate A: right = new_var_max, left = new_var_min
-        candA = [
-            (new_var_max, y_fixed, new_z_min),  # BR
-            (new_var_min, y_fixed, new_z_min),  # BL
-            (new_var_min, y_fixed, new_z_max),  # TL
-            (new_var_max, y_fixed, new_z_max),  # TR
+        # If the original window spanned from low X to high X, that's the "left to right" direction
+        if vertices[0][0] < vertices[1][0]:  # Original v0 to v1: X increases
+            # For south walls, X should increase from left to right
+            left_x, right_x = new_var_min, new_var_max
+        else:  # Original v0 to v1: X decreases
+            # For north walls, X should decrease from left to right
+            left_x, right_x = new_var_max, new_var_min
+
+        # CCW order: bottom-left → bottom-right → top-right → top-left
+        return [
+            (left_x, y_fixed, new_z_min),  # Bottom-left
+            (right_x, y_fixed, new_z_min),  # Bottom-right
+            (right_x, y_fixed, new_z_max),  # Top-right
+            (left_x, y_fixed, new_z_max),  # Top-left
         ]
-        # Candidate B: right = new_var_min, left = new_var_max
-        candB = [
-            (new_var_min, y_fixed, new_z_min),
-            (new_var_max, y_fixed, new_z_min),
-            (new_var_max, y_fixed, new_z_max),
-            (new_var_min, y_fixed, new_z_max),
-        ]
-
-    # Use appropriate projection plane for signed area
-    def signed_area_on_plane(verts, plane: str) -> float:
-        if plane == 'yz':
-            a = [v[1] for v in verts]
-            b = [v[2] for v in verts]
-        elif plane == 'xz':
-            a = [v[0] for v in verts]
-            b = [v[2] for v in verts]
-        else:  # 'xy'
-            a = [v[0] for v in verts]
-            b = [v[1] for v in verts]
-        return 0.5 * sum(a[i] * b[(i + 1) % 4] - a[(i + 1) % 4] * b[i] for i in range(4))
-
-    if fixed_axis == 'x':
-        plane = 'yz'
-    elif fixed_axis == 'y':
-        plane = 'xz'
-    else:
-        plane = 'xy'
-
-    orig_area = signed_area_on_plane(vertices.tolist(), plane)
-    areaA = signed_area_on_plane(candA, plane)
-
-    # Pick candidate whose winding matches original to preserve outward normal
-    chosen = candA if np.sign(areaA) == np.sign(orig_area) else candB
-
-    return chosen
 
 
 def apply_wwr_to_windows(idf, params: dict | None = None):
     fenestrations = idf.idfobjects['FENESTRATIONSURFACE:DETAILED']
     for fenestration in fenestrations:
         parent_wall_name = fenestration.Building_Surface_Name
-        parent_wall_name_l = str(parent_wall_name or '').lower()
         parent_wall = None
         for wall in idf.idfobjects['BUILDINGSURFACE:DETAILED']:
             if wall.Name == parent_wall_name:
@@ -986,8 +978,16 @@ def apply_wwr_to_windows(idf, params: dict | None = None):
                 break
         if parent_wall is None:
             continue
-        
-        # Calculate azimuth from wall vertices instead of accessing non-existent field
+
+        # Use geometric analysis to determine wall orientation
+        orientation = identify_wall_orientation_by_vertices(parent_wall)
+
+        if orientation is None:
+            continue
+
+        orientation_str = orientation.lower()
+
+        # Collect wall vertices for area calculation
         wall_vertices = []
         for i in range(1, 5):
             x = getattr(parent_wall, f'Vertex_{i}_Xcoordinate', None)
@@ -995,37 +995,12 @@ def apply_wwr_to_windows(idf, params: dict | None = None):
             z = getattr(parent_wall, f'Vertex_{i}_Zcoordinate', None)
             if x is not None and y is not None and z is not None:
                 wall_vertices.append((float(x), float(y), float(z)))
-        
+
         if len(wall_vertices) < 4:
             continue
-        
-        # Compute azimuth once from wall geometry for downstream use
-        v0, v1 = wall_vertices[0], wall_vertices[1]
-        dx = v1[0] - v0[0]
-        dy = v1[1] - v0[1]
-        azimuth = np.degrees(np.arctan2(dy, dx)) % 360
 
-        # Determine orientation string for zone-specific lookup
-        orientation_str = None
-        if 'south' in parent_wall_name_l:
-            orientation_str = 'south'
-        elif 'west' in parent_wall_name_l:
-            orientation_str = 'west'
-        elif 'east' in parent_wall_name_l:
-            orientation_str = 'east'
-        elif 'north' in parent_wall_name_l:
-            orientation_str = 'north'
-
-        # Fallback to azimuth-based orientation if name not informative
-        if orientation_str is None:
-            if 45 <= azimuth < 135:
-                orientation_str = 'east'
-            elif 135 <= azimuth < 225:
-                orientation_str = 'north'
-            elif 225 <= azimuth < 315:
-                orientation_str = 'west'
-            else:
-                orientation_str = 'south'
+        # Use wall orientation for window geometry calculation
+        # (azimuth calculation removed - using coordinate-based orientation)
 
         # Zone-specific precedence using parent wall zone name
         wwr = None
@@ -1075,7 +1050,7 @@ def apply_wwr_to_windows(idf, params: dict | None = None):
         # Sill height
         sill_height = min([v[2] for v in win_vertices])
         # Calculate new vertices
-        new_vertices = calculate_window_geometry(win_vertices, wwr, wall_area, sill_height, azimuth)
+        new_vertices = calculate_window_geometry(win_vertices, wwr, wall_area, sill_height, orientation)
         # Update fenestration vertices
         for i, (x, y, z) in enumerate(new_vertices, 1):
             setattr(fenestration, f'Vertex_{i}_Xcoordinate', x)
