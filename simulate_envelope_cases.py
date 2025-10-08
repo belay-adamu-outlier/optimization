@@ -15,6 +15,7 @@ from util.energyplus_utils import (
     run_simulation,
     analyze_simulation_results,
 )
+from util.data_utils import load_config
 from constants import (
     FILE_PATHS,
     SIM_PARAMS,
@@ -41,7 +42,14 @@ class EnvelopeCaseSimulator:
         self.csv_path = csv_path or FILE_PATHS.CSV_INPUT
         self.idf_path = idf_path or FILE_PATHS.IDF_TEMPLATE
         self.weather_path = weather_path or FILE_PATHS.WEATHER_FILE
-        self.num_workers = num_workers or SIM_PARAMS.DEFAULT_NUM_WORKERS
+
+        # Get num_workers from config.json with fallback to 4
+        if num_workers is not None:
+            self.num_workers = num_workers
+        else:
+            config = load_config()
+            self.num_workers = config.get('num_workers', 4)
+
         self.output_csv = output_csv or f"envelope_shading_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
 
         self.shading_dimensions = SHADING_CONFIG.dimensions
@@ -390,7 +398,7 @@ class EnvelopeCaseSimulator:
             raise
 
 
-def main(max_cases: int = 1):
+def main(max_cases: int = None):
     """Main function for testing with limited cases."""
     simulator = EnvelopeCaseSimulator()
     simulator.run(max_cases=max_cases)
