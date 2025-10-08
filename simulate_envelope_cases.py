@@ -390,7 +390,7 @@ class EnvelopeCaseSimulator:
             raise
 
 
-def main(max_cases: int = None):
+def main(max_cases: int = 1):
     """Main function for testing with limited cases."""
     simulator = EnvelopeCaseSimulator()
     simulator.run(max_cases=max_cases)
