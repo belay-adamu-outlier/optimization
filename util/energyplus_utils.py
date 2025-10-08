@@ -872,7 +872,8 @@ def calculate_window_geometry(
     wwr,
     wall_area,
     sill_height,
-    wall_orientation
+    wall_orientation,
+    wall_vertices=None
 ):
     """
     Recompute window vertices from WWR using a fixed 1.5 m height.
@@ -880,6 +881,8 @@ def calculate_window_geometry(
     Uses window_area = wall_area * wwr. Sets height to 1.5 m and derives width
     from area/height. Preserves sill height and centers horizontally on the
     wall's variable axis. Uses wall orientation to determine correct vertex ordering.
+    If calculated window would extend beyond wall boundaries, uses wall span and
+    adjusts height to maintain area while respecting wall height limits.
 
     Args:
         vertices: Original window vertex coordinates
@@ -887,6 +890,7 @@ def calculate_window_geometry(
         wall_area: Area of the parent wall
         sill_height: Sill height of the window
         wall_orientation: Wall orientation ('North', 'South', 'East', 'West')
+        wall_vertices: Wall vertex coordinates for boundary checking (optional)
 
     Returns:
         List of new vertex coordinates in CCW order
@@ -903,12 +907,16 @@ def calculate_window_geometry(
     # North/South walls: Y is constant → vary X
     if wall_orientation in ['East', 'West']:
         fixed_axis = 'x'
-        var_vals = vertices[:, 1]
     elif wall_orientation in ['North', 'South']:
         fixed_axis = 'y'
-        var_vals = vertices[:, 0]
     else:
         raise ValueError(f"Unknown wall orientation: {wall_orientation}")
+
+    # Set variable coordinates based on fixed axis
+    if fixed_axis == 'x':
+        var_vals = vertices[:, 1]  # Y coordinates vary for east/west walls
+    else:
+        var_vals = vertices[:, 0]  # X coordinates vary for north/south walls
     
     # Calculate center of the variable coordinate (for centering the window)
     center = (np.max(var_vals) + np.min(var_vals)) / 2
@@ -918,14 +926,15 @@ def calculate_window_geometry(
     fixed_height = 1.5
     new_height = fixed_height
     new_width = window_area / fixed_height
-    
+
     # Keep original sill height
     new_z_min = sill_height
-    new_z_max = sill_height + new_height
-    
-    # Calculate new variable coordinate range (centered)
-    new_var_min = center - new_width / 2
-    new_var_max = center + new_width / 2
+
+    # Apply wall boundary constraints if wall vertices are provided
+    new_var_min, new_var_max, new_z_max = constrain_window_to_wall_boundaries(
+        center - new_width / 2, center + new_width / 2, new_z_min, new_width, new_height, window_area,
+        center, wall_vertices, fixed_axis
+    )
     
     # Always use CCW ordering for outward normals
     # Determine the correct "left" and "right" based on wall orientation
@@ -965,6 +974,111 @@ def calculate_window_geometry(
             (right_x, y_fixed, new_z_max),  # Top-right
             (left_x, y_fixed, new_z_max),  # Top-left
         ]
+
+
+def constrain_window_to_wall_boundaries(
+    calculated_var_min, calculated_var_max, new_z_min, new_width, new_height, window_area,
+    center, wall_vertices, fixed_axis
+):
+    """
+    Constrain window dimensions to wall boundaries.
+
+    If calculated window would extend beyond wall boundaries, uses wall span
+    and adjusts height to maintain area while respecting wall height limits.
+
+    Args:
+        calculated_var_min: Calculated minimum variable coordinate (center - width/2)
+        calculated_var_max: Calculated maximum variable coordinate (center + width/2)
+        new_z_min: Window sill height (bottom Z)
+        new_width: Calculated window width
+        new_height: Calculated window height
+        window_area: Required window area
+        center: Center position for centering
+        wall_vertices: Wall vertex coordinates for boundary checking
+        fixed_axis: 'x' for east/west walls, 'y' for north/south walls
+
+    Returns:
+        Tuple of (adjusted_var_min, adjusted_var_max, adjusted_z_max)
+    """
+    if wall_vertices is None or len(wall_vertices) < 4:
+        # No wall vertices provided, use original logic
+        return calculated_var_min, calculated_var_max, new_z_min + new_height
+
+    wall_vertices = np.array(wall_vertices)
+
+    if fixed_axis == 'x':  # East/West walls
+        # Get wall's Y span (variable axis)
+        wall_var_coords = wall_vertices[:, 1]
+        wall_var_min = np.min(wall_var_coords)
+        wall_var_max = np.max(wall_var_coords)
+        wall_var_span = wall_var_max - wall_var_min
+
+        # Get wall's Z span for height checking
+        wall_z_coords = wall_vertices[:, 2]
+        wall_z_min = np.min(wall_z_coords)
+        wall_z_max = np.max(wall_z_coords)
+
+        # Check if calculated width exceeds wall span
+        if new_width > wall_var_span:
+            # Use wall's actual span for horizontal coordinates
+            new_var_min = wall_var_min
+            new_var_max = wall_var_max
+
+            # Adjust height to maintain area
+            actual_width = wall_var_span
+            new_height = window_area / actual_width
+
+            # Ensure height doesn't exceed wall height
+            wall_height = wall_z_max - wall_z_min
+            if new_height > wall_height:
+                new_height = wall_height
+                # Use wall's top Z coordinate
+                new_z_max = wall_z_max
+            else:
+                new_z_max = new_z_min + new_height
+        else:
+            new_z_max = new_z_min + new_height
+            # Keep centered positioning
+            new_var_min = center - new_width / 2
+            new_var_max = center + new_width / 2
+
+    else:  # North/South walls
+        # Get wall's X span (variable axis)
+        wall_var_coords = wall_vertices[:, 0]
+        wall_var_min = np.min(wall_var_coords)
+        wall_var_max = np.max(wall_var_coords)
+        wall_var_span = wall_var_max - wall_var_min
+
+        # Get wall's Z span for height checking
+        wall_z_coords = wall_vertices[:, 2]
+        wall_z_min = np.min(wall_z_coords)
+        wall_z_max = np.max(wall_z_coords)
+
+        # Check if calculated width exceeds wall span
+        if new_width > wall_var_span:
+            # Use wall's actual span for horizontal coordinates
+            new_var_min = wall_var_min
+            new_var_max = wall_var_max
+
+            # Adjust height to maintain area
+            actual_width = wall_var_span
+            new_height = window_area / actual_width
+
+            # Ensure height doesn't exceed wall height
+            wall_height = wall_z_max - wall_z_min
+            if new_height > wall_height:
+                new_height = wall_height
+                # Use wall's top Z coordinate
+                new_z_max = wall_z_max
+            else:
+                new_z_max = new_z_min + new_height
+        else:
+            new_z_max = new_z_min + new_height
+            # Keep centered positioning
+            new_var_min = center - new_width / 2
+            new_var_max = center + new_width / 2
+
+    return new_var_min, new_var_max, new_z_max
 
 
 def apply_wwr_to_windows(idf, params: dict | None = None):
@@ -1050,7 +1164,7 @@ def apply_wwr_to_windows(idf, params: dict | None = None):
         # Sill height
         sill_height = min([v[2] for v in win_vertices])
         # Calculate new vertices
-        new_vertices = calculate_window_geometry(win_vertices, wwr, wall_area, sill_height, orientation)
+        new_vertices = calculate_window_geometry(win_vertices, wwr, wall_area, sill_height, orientation, wall_vertices)
         # Update fenestration vertices
         for i, (x, y, z) in enumerate(new_vertices, 1):
             setattr(fenestration, f'Vertex_{i}_Xcoordinate', x)
