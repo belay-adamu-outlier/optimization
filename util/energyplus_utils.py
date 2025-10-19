@@ -369,7 +369,11 @@ def create_shading_elements_by_orientation(idf: IDF, dimensions: Optional[Dict[s
             continue
 
         overhang_params = side_dims.get('overhang')
-        overhang_angle = overhang_params.get('angle', 0) if isinstance(overhang_params, dict) else 0
+        raw_angle = overhang_params.get('angle', 0) if isinstance(overhang_params, dict) else 0
+        try:
+            overhang_angle = float(raw_angle or 0.0)
+        except (TypeError, ValueError):
+            overhang_angle = 0.0
 
         if isinstance(overhang_params, dict):
             _create_overhang(
@@ -381,7 +385,11 @@ def create_shading_elements_by_orientation(idf: IDF, dimensions: Optional[Dict[s
             )
 
         right_params = side_dims.get('right_fin')
-        if isinstance(right_params, dict):
+        outward_projection = 0.0
+        if overhang_angle >= 5.0:
+            outward_projection = float(overhang_params.get('depth', 0.0) or 0.0) * math.sin(math.radians(overhang_angle))
+
+        if isinstance(right_params, dict) and overhang_angle >= 5.0 and outward_projection > 0.1:
             _create_fin(
                 idf,
                 fenestration,
@@ -393,7 +401,7 @@ def create_shading_elements_by_orientation(idf: IDF, dimensions: Optional[Dict[s
             )
 
         left_params = side_dims.get('left_fin')
-        if isinstance(left_params, dict):
+        if isinstance(left_params, dict) and overhang_angle >= 5.0 and outward_projection > 0.1:
             _create_fin(
                 idf,
                 fenestration,
@@ -483,6 +491,8 @@ def _create_overhang(
     # Resolve the overhang edge using basic trigonometry:
     # horizontal projection (outward) uses sin, vertical drop uses cos.
     outward_depth = depth * math.sin(angle_rad)
+    if outward_depth <= 0.05:
+        outward_depth = 0.05
     vertical_drop = depth * math.cos(angle_rad)
     bottom_z = max_z - vertical_drop
 
@@ -526,7 +536,7 @@ def _create_overhang(
     # Create the shading object
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
     shading.Name = f"{orientation.capitalize()} Overhang {fenestration.Name}"
-    shading.Transmittance_Schedule_Name = "South Overhang Shading Schedule"
+    shading.Transmittance_Schedule_Name = "Off"
     shading.Number_of_Vertices = len(vertices)
     
     # Set vertices with proper counter-clockwise ordering
@@ -579,6 +589,8 @@ def _create_fin(
     clamped_angle = max(0.0, min(float(overhang_angle or 0.0), 90.0))
     angle_rad = math.radians(clamped_angle)
     outward_offset = side_depth * math.sin(angle_rad)
+    if outward_offset <= 0.05:
+        outward_offset = 0.05
     vertical_drop = side_depth * math.cos(angle_rad)
 
     outer_top_z = max(max_z - vertical_drop, min_z)
@@ -622,7 +634,7 @@ def _create_fin(
     shading = idf.newidfobject('SHADING:BUILDING:DETAILED')
     side = 'Left' if left_depth > 0 else 'Right'
     shading.Name = f"{orientation.capitalize()} Fin {fenestration.Name} {side}"
-    shading.Transmittance_Schedule_Name = "South Overhang Shading Schedule"
+    shading.Transmittance_Schedule_Name = "Off"
     shading.Number_of_Vertices = len(vertices)
     
     # Set vertices with proper counter-clockwise ordering
