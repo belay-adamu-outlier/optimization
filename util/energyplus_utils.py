@@ -400,6 +400,7 @@ def create_shading_elements_by_orientation(idf: IDF, dimensions: Optional[Dict[s
                 orientation,
                 side='right',
                 params=right_params,
+                overhang_params=overhang_params,
             )
 
         left_params = side_dims.get('left_fin')
@@ -411,6 +412,7 @@ def create_shading_elements_by_orientation(idf: IDF, dimensions: Optional[Dict[s
                 orientation,
                 side='left',
                 params=left_params,
+                overhang_params=overhang_params,
             )
     
     return idf
@@ -550,6 +552,69 @@ def _create_overhang(
         setattr(shading, f'Vertex_{i}_Zcoordinate', z)
 
 
+def _compute_overhang_fin_trim(
+    overhang_params: Dict[str, Any],
+    fin_depth: float,
+    fin_bottom_z: float,
+    fin_top_z: float,
+    fen_vertices: List[Tuple[float, float, float]]
+) -> Optional[Dict[str, float]]:
+    """Compute trimming parameters for fin against an overhang plane.
+
+    Returns a dict with:
+    - 'z_at_outer': plane Z at fin outer edge (outward = fin_depth), if within
+      overhang horizontal reach; otherwise omitted
+    - 'u_at_bottom': outward distance where plane hits fin bottom (z=fin_bottom_z),
+      if within [0, fin_depth]; otherwise omitted
+    """
+    if not overhang_params or not isinstance(overhang_params, dict):
+        return None
+
+    try:
+        overhang_depth = float(overhang_params.get('depth', 0.0) or 0.0)
+        overhang_angle = float(overhang_params.get('angle', 0.0) or 0.0)
+        height_above = float(overhang_params.get('height_above', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return None
+
+    if overhang_depth <= 0.0:
+        return None
+
+    zs = [v[2] for v in fen_vertices]
+    window_top_z = max(zs)
+
+    angle_deg = max(0.0, min(float(overhang_angle), 90.0))
+    angle_rad = math.radians(angle_deg)
+    sin_a = math.sin(angle_rad)
+    cos_a = math.cos(angle_rad)
+
+    # If no horizontal projection, plane does not extend outward from the wall
+    if sin_a <= 1e-6:
+        return None
+
+    outward_depth_oh = overhang_depth * sin_a
+    vertical_drop_oh = overhang_depth * cos_a
+    if outward_depth_oh <= 1e-6:
+        return None
+
+    slope_z_per_out = vertical_drop_oh / outward_depth_oh
+    overhang_top_z = window_top_z + height_above
+
+    result: Dict[str, float] = {}
+
+    # Plane Z at fin outer edge (only if overhang reaches that outward distance)
+    if fin_depth <= outward_depth_oh + 1e-9:
+        z_at_outer = overhang_top_z - slope_z_per_out * fin_depth
+        result['z_at_outer'] = z_at_outer
+
+    # Outward distance where plane meets fin bottom
+    u_at_bottom = (overhang_top_z - fin_bottom_z) / slope_z_per_out
+    if 0.0 < u_at_bottom <= fin_depth + 1e-9:
+        result['u_at_bottom'] = max(0.0, min(u_at_bottom, fin_depth))
+
+    return result if result else None
+
+
 def _create_fin(
     idf: IDF,
     fenestration: Any,
@@ -557,11 +622,12 @@ def _create_fin(
     orientation: str,
     side: str,
     params: Dict[str, Any],
+    overhang_params: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Create a vertical fin shading element for one side of a fenestration.
 
-    Applies the requested depth/extension directly without trimming against
-    overhangs. Geometry is a simple rectangle extruded from the wall plane.
+    When overhang parameters are provided, trims the fin geometry to avoid
+    interference with the overhang plane using geometric intersection calculation.
     """
     if not fen_vertices or len(fen_vertices) < 3:
         return
@@ -594,7 +660,17 @@ def _create_fin(
     top_z_nominal = max_z + extension
     if top_z_nominal <= bottom_z + 1e-6:
         return
-    top_z = top_z_nominal
+
+    # Compute geometric trimming against overhang plane
+    trim = None
+    if overhang_params:
+        trim = _compute_overhang_fin_trim(
+            overhang_params,
+            fin_depth=depth,
+            fin_bottom_z=bottom_z,
+            fin_top_z=top_z_nominal,
+            fen_vertices=fen_vertices,
+        )
 
     orientation = orientation.lower()
 
@@ -622,12 +698,58 @@ def _create_fin(
     else:
         return
 
-    points_local = [
-        (depth, bottom_z),
-        (0.0, bottom_z),
-        (0.0, top_z),
-        (depth, top_z),
-    ]
+    # Build vertices per trimming rules while keeping wall-edge vertices fixed
+    # Local vertex roles:
+    # - Bottom wall: (0.0, bottom_z) [unchanged]
+    # - Top wall: (0.0, top_z_nominal) [unchanged]
+    # - Bottom outer: (depth, bottom_z) [may be replaced in triangle case]
+    # - Top outer: (depth, top_z_nominal) [may be lowered in partial cut]
+
+    top_wall_z = top_z_nominal
+    bottom_wall = (0.0, bottom_z)
+    top_wall = (0.0, top_wall_z)
+    bottom_outer = (depth, bottom_z)
+    top_outer = (depth, top_z_nominal)
+
+    points_local: List[Tuple[float, float]]
+    if trim is None:
+        # No trimming
+        points_local = [
+            bottom_outer,
+            bottom_wall,
+            top_wall,
+            top_outer,
+        ]
+    else:
+        z_at_outer = trim.get('z_at_outer') if isinstance(trim, dict) else None
+        u_at_bottom = trim.get('u_at_bottom') if isinstance(trim, dict) else None
+
+        # Determine case: triangle when plane cuts the entire outer edge height
+        if z_at_outer is not None and z_at_outer <= bottom_z + 1e-9 and u_at_bottom is not None and u_at_bottom > 0.0:
+            # Triangle: replace bottom-outer by intersection on bottom edge, drop top-outer
+            bottom_intersection = (u_at_bottom, bottom_z)
+            points_local = [
+                bottom_wall,            # unchanged
+                top_wall,               # unchanged
+                bottom_intersection,    # updated
+            ]
+        elif z_at_outer is not None and bottom_z < z_at_outer < top_z_nominal:
+            # Partial cut: only lower the top-outer Z, others unchanged
+            lowered_top_outer = (depth, z_at_outer)
+            points_local = [
+                bottom_outer,
+                bottom_wall,
+                top_wall,
+                lowered_top_outer,
+            ]
+        else:
+            # Overhang does not reach fin outer edge or above top: keep rectangle
+            points_local = [
+                bottom_outer,
+                bottom_wall,
+                top_wall,
+                top_outer,
+            ]
 
     vertices = [to_world(outward, height) for outward, height in points_local]
 
@@ -856,7 +978,7 @@ def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
         infiltration_ach_50pa (float): Infiltration rate in ACH at 50 Pa
     """
     # Convert ACH at 50 Pa to ambient conditions (divide by 20 for typical conversion)
-    infiltration_ach_ambient = infiltration_ach_50pa / 20.0
+    infiltration_ach_ambient = infiltration_ach_50pa / 16
     
     zones = idf.idfobjects['ZONE']
     
@@ -1360,7 +1482,11 @@ def run_simulation(
         gc.collect()
 
 
-def analyze_simulation_results(output_dir, cleanup=True, overheating_criterion='ASHRAE'):
+def analyze_simulation_results(
+    output_dir, 
+    cleanup=True, 
+    overheating_criterion='CIBSE59'
+):
     """
     Analyze simulation results from a completed EnergyPlus simulation.
     

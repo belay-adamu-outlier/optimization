@@ -1494,8 +1494,36 @@ class TestCreateShadingElementsByOrientation:
             setattr(self.mock_west_fenestration, f'Vertex_{i}_Ycoordinate', 5.0)
             setattr(self.mock_west_fenestration, f'Vertex_{i}_Zcoordinate', 1.0 if i <= 2 else 2.5)
         
+        # Create mock wall objects for each orientation
+        self.mock_south_wall = Mock()
+        self.mock_south_wall.Name = 'South:Zone1'
+        # South wall: constant Y, varying X (wall faces south, so vertices go from west to east)
+        for i in range(1, 5):
+            setattr(self.mock_south_wall, f'Vertex_{i}_Xcoordinate', (i-1) * 2.0)  # X: 0, 2, 4, 6
+            setattr(self.mock_south_wall, f'Vertex_{i}_Ycoordinate', 0.0)          # Y: constant 0
+            setattr(self.mock_south_wall, f'Vertex_{i}_Zcoordinate', 0.0 if i <= 2 else 3.0)  # Z: bottom then top
+
+        self.mock_east_wall = Mock()
+        self.mock_east_wall.Name = 'East:Zone1'
+        # East wall: constant X, varying Y (wall faces east, so vertices go from south to north)
+        for i in range(1, 5):
+            setattr(self.mock_east_wall, f'Vertex_{i}_Xcoordinate', 10.0)         # X: constant 10
+            setattr(self.mock_east_wall, f'Vertex_{i}_Ycoordinate', (i-1) * 2.0)  # Y: 0, 2, 4, 6
+            setattr(self.mock_east_wall, f'Vertex_{i}_Zcoordinate', 0.0 if i <= 2 else 3.0)  # Z: bottom then top
+
+        self.mock_west_wall = Mock()
+        self.mock_west_wall.Name = 'West:Zone1'
+        # West wall: constant X, varying Y (wall faces west, so vertices go from north to south)
+        for i in range(1, 5):
+            setattr(self.mock_west_wall, f'Vertex_{i}_Xcoordinate', 0.0)          # X: constant 0
+            setattr(self.mock_west_wall, f'Vertex_{i}_Ycoordinate', 6.0 - (i-1) * 2.0)  # Y: 6, 4, 2, 0
+            setattr(self.mock_west_wall, f'Vertex_{i}_Zcoordinate', 0.0 if i <= 2 else 3.0)  # Z: bottom then top
+
         # Set up idfobjects dictionary
         self.mock_idf.idfobjects = {
+            'BUILDINGSURFACE:DETAILED': [
+                self.mock_south_wall, self.mock_east_wall, self.mock_west_wall
+            ],
             'FENESTRATIONSURFACE:DETAILED': [
                 self.mock_south_fenestration, self.mock_east_fenestration, self.mock_west_fenestration
             ]
@@ -1665,17 +1693,113 @@ class TestCreateShadingElementsByOrientation:
         # Expect 3 objects: overhang + 2 fins
         assert len(created) == 3
 
-        # Check overhang schedule name is orientation-specific
+        # Check overhang schedule name is initially set to "Off"
         overhang = created[0]
-        assert getattr(overhang, 'Transmittance_Schedule_Name') == 'South Overhang Shading Schedule'
+        assert getattr(overhang, 'Transmittance_Schedule_Name') == 'Off'
         assert getattr(overhang, 'Number_of_Vertices') == 4
 
         # Check at least one fin becomes triangular (3 vertices) under high angle
         fin_vertices = [getattr(obj, 'Number_of_Vertices', None) for obj in created[1:]]
         assert any(v == 3 for v in fin_vertices)
-        # And fin schedule names are orientation-specific
+        # And fin schedule names are initially set to "Off"
         fin_scheds = [getattr(obj, 'Transmittance_Schedule_Name', '') for obj in created[1:]]
-        assert all(s == 'South Fin Shading Schedule' for s in fin_scheds)
+        assert all(s == 'Off' for s in fin_scheds)
+
+    def test_fin_trimming_with_overhang_interference(self):
+        """Test that fins are trimmed when they interfere with overhangs."""
+        # Create dimensions where overhang will cut into fin
+        dims = {
+            'south': {
+                'overhang': {'depth': 0.8, 'angle': 30.0, 'height_above': 0.2},
+                'left_fin': {'depth': 0.5, 'extension': 1.0},  # Extension will be cut by overhang
+                'right_fin': {'depth': 0.5, 'extension': 1.0},
+            }
+        }
+
+        # Mock the IDF creation to capture vertex data
+        created_objects = []
+        def capture_object(obj_type):
+            if obj_type == 'SHADING:BUILDING:DETAILED':
+                obj = Mock()
+                obj.Number_of_Vertices = 4  # Default value
+                obj.Name = ''  # Default value
+                created_objects.append(obj)
+            return obj
+
+        self.mock_idf.newidfobject.side_effect = capture_object
+
+        create_shading_elements_by_orientation(self.mock_idf, dims)
+
+        # Should create 1 overhang + 2 fins = 3 objects
+        assert len(created_objects) == 3
+
+        # Check that fins have correct vertex counts (should be 3 for triangles due to trimming)
+        fin_objects = [obj for obj in created_objects if 'Fin' in obj.Name]
+        assert len(fin_objects) == 2
+
+        # Both fins should be triangles (3 vertices) due to overhang interference
+        for fin in fin_objects:
+            assert fin.Number_of_Vertices == 3, f"Fin should be triangle but has {fin.Number_of_Vertices} vertices"
+
+    def test_fin_no_trimming_without_overhang(self):
+        """Test that fins are not trimmed when no overhang is present."""
+        dims = {
+            'south': {
+                'left_fin': {'depth': 0.5, 'extension': 1.0},
+                'right_fin': {'depth': 0.5, 'extension': 1.0},
+            }
+        }
+
+        # Mock the IDF creation to capture vertex data
+        created_objects = []
+        def capture_object(obj_type, **kwargs):
+            if obj_type == 'SHADING:BUILDING:DETAILED':
+                obj = Mock()
+                obj.Number_of_Vertices = kwargs.get('Number_of_Vertices', 4)
+                obj.Name = kwargs.get('Name', '')
+                created_objects.append(obj)
+            return Mock()
+
+        self.mock_idf.newidfobject.side_effect = capture_object
+
+        create_shading_elements_by_orientation(self.mock_idf, dims)
+
+        # Should create 2 fins = 2 objects
+        assert len(created_objects) == 2
+
+        # Both fins should be rectangles (4 vertices) since no overhang interference
+        for fin in created_objects:
+            assert fin.Number_of_Vertices == 4, f"Fin should be rectangle but has {fin.Number_of_Vertices} vertices"
+
+    def test_fin_partial_trimming_with_overhang(self):
+        """Test fin trimming when overhang only partially cuts the fin."""
+        dims = {
+            'south': {
+                'overhang': {'depth': 0.4, 'angle': 15.0, 'height_above': 0.1},
+                'left_fin': {'depth': 0.5, 'extension': 0.5},  # Extension partially cut by overhang
+            }
+        }
+
+        # Mock the IDF creation to capture vertex data
+        created_objects = []
+        def capture_object(obj_type):
+            if obj_type == 'SHADING:BUILDING:DETAILED':
+                obj = Mock()
+                obj.Number_of_Vertices = 4  # Default value
+                obj.Name = ''  # Default value
+                created_objects.append(obj)
+            return obj
+
+        self.mock_idf.newidfobject.side_effect = capture_object
+
+        create_shading_elements_by_orientation(self.mock_idf, dims)
+
+        # Should create 1 overhang + 1 fin = 2 objects
+        assert len(created_objects) == 2
+
+        fin_obj = next(obj for obj in created_objects if 'Fin' in obj.Name)
+        # Fin should be triangle (3 vertices) since overhang cuts part of it
+        assert fin_obj.Number_of_Vertices == 3, f"Fin should be triangle but has {fin_obj.Number_of_Vertices} vertices"
 
 
 class TestModifyIdf:
