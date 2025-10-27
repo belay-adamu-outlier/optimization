@@ -71,7 +71,7 @@ class EnvelopeCaseSimulator:
                 if not all([row.get(col) for col in CSV_CONFIG.required_csv_columns]):
                     continue
 
-                tedi = float(row['Thermal Energy Deman Intensity'])
+                tedi = float(row['Thermal Energy Demand Intensity'])
                 if tedi <= SIM_PARAMS.TEDI_THRESHOLD:
                     case = EnvelopeCase(
                         generation=int(row['Generation']),

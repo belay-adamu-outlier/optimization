@@ -37,10 +37,7 @@ class ShadingConfiguration:
         return {
             'overhang': {
                 'depth': 2.0,
-                'angle': 0.0,
-                'height_above': 0.0,
-                'left_extension_pct': 0.0,
-                'right_extension_pct': 0.0
+                'angle': 90.0
             },
             'left_fin': {'depth': 2.0},
             'right_fin': {'depth': 2.0}
@@ -52,12 +49,8 @@ class ShadingConfiguration:
         return {
             'overhang': {
                 'depth': 2.0,
-                'angle': 0.0,
-                'height_above': 0.0,
-                'left_extension_pct': 0.0,
-                'right_extension_pct': 0.0
-            },
-            'right_fin': {'depth': 2.0}
+                'angle': 0.0
+            }
         }
 
     @property
@@ -76,7 +69,7 @@ class CSVConfiguration:
     def required_csv_columns(self) -> List[str]:
         """Required columns in the input CSV file."""
         return [
-            'Thermal Energy Deman Intensity',  # Note: typo in original CSV
+            'Thermal Energy Demand Intensity',
             'Max_Living_Room_Overheating',
             'Max_Bedroom_Overheating',
             'external_wall',
