@@ -228,8 +228,10 @@ def analyze_overheating_with_ASHRAE(temp_data: Dict[str, pd.DataFrame],
     return results
 
 
-def analyze_overheating_with_CIBSE59(temp_data: Dict[str, pd.DataFrame], 
-                                     summer_months: List[int] | None = None) -> dict:
+def analyze_overheating_with_CIBSE59(
+    temp_data: Dict[str, pd.DataFrame], 
+    summer_months: List[int] | None = None
+) -> dict:
     """
     Perform CIBSE59 overheating analysis on temperature data.
     
@@ -281,34 +283,28 @@ def analyze_overheating_with_CIBSE59(temp_data: Dict[str, pd.DataFrame],
     for zone_name, zone_data in temp_data.items():
         if zone_name == 'outdoor':
             continue
-            
-        # Filter zone data for summer months
-        summer_zone = zone_data[zone_data['month'].isin(summer_months)]
-        
-        if len(summer_zone) == 0:
-            continue
-        
-        overheating_hours = 0
-        
-        # Determine zone type based on name
-        # Handle both formats: "Zone:BR" and "ZoneBR"
+
+        # Determine zone type based on name (supports both "Zone:BR" and "ZoneBR")
         is_bedroom = zone_name.endswith('BR') or zone_name.endswith(':BR')
-        is_living_room = zone_name.endswith('LR') or zone_name.endswith(':LR')
-        
+
+        overheating_hours = 0
+
         if is_bedroom:
-            # Criterion 2: Bedrooms - check if temperature exceeds 26°C during sleeping hours (10pm-6am, excluding hour 7)
-            sleeping_hours = summer_zone[
-                (summer_zone['hour'] >= 22) | (summer_zone['hour'] <= 6)
-            ]
-            
+            # Criterion 2: Bedrooms — evaluate across the full year during sleeping hours (22:00–06:59)
+            sleeping_hours = zone_data[(zone_data['hour'] >= 22) | (zone_data['hour'] <= 6)]
+
             if len(sleeping_hours) > 0:
-                # Calculate rounded difference between room temperature and threshold (26°C)
                 temp_diff = sleeping_hours['temperature'] - CIBSE59_BEDROOM_THRESHOLD
                 temp_diff_rounded = temp_diff.round()
-                
-                # Count hours where rounded temperature difference is >= 0 (i.e., room temp >= 26°C)
                 overheating_hours = (temp_diff_rounded > 0).sum()
+            
+            zone_total_hours = len(zone_data)
         else:
+            # For living rooms/kitchens, analysis is limited to summer months per TM59
+            summer_zone = zone_data[zone_data['month'].isin(summer_months)]
+            if len(summer_zone) == 0:
+                continue
+            
             # Criterion 1: Living rooms/kitchens - check if temperature difference exceeds 1K
             # Calculate threshold: Tmax = 0.33 × Trm + 21.8
             min_length = min(len(summer_zone), len(running_mean_temps))
@@ -327,11 +323,12 @@ def analyze_overheating_with_CIBSE59(temp_data: Dict[str, pd.DataFrame],
             
             # Count hours where temperature difference exceeds 1K
             overheating_hours = (temp_diff_rounded > CIBSE59_EXCEEDANCE_THRESHOLD).sum()
+            zone_total_hours = len(summer_zone)
         
         zone_results[zone_name] = {
             'overheating_hours': overheating_hours,
-            'total_hours': len(summer_zone),
-            'overheating_percentage': (overheating_hours / len(summer_zone)) * 100 if len(summer_zone) > 0 else 0,
+            'total_hours': zone_total_hours,
+            'overheating_percentage': (overheating_hours / zone_total_hours) * 100 if zone_total_hours > 0 else 0,
             'zone_type': 'bedroom' if is_bedroom else 'living_room/kitchen'
         }
         
@@ -376,17 +373,17 @@ def print_overheating_analysis_results(results: dict) -> None:
     print(f"{criterion} OVERHEATING ANALYSIS")
     print("="*60)
     
-    print(f"\nAnalysis Period: {results['analysis_period']}")
-    print(f"Summer Months: {results['summer_months']}")
+    print("\nAnalysis Period: " + str(results['analysis_period']))
+    print("Summer Months: " + str(results['summer_months']))
     if 'excluded_zones' in results:
         print(f"Excluded Zones: {results['excluded_zones']}")
     print(f"Total Zones Analyzed: {results['zone_count']}")
     
-    print(f"\nOVERALL RESULTS:")
+    print("\nOVERALL RESULTS:")
     print(f"  Total Overheating Hours: {results['total_overheating_hours']:.1f}")
     print(f"  Average Overheating Hours: {results['average_overheating_hours']:.1f}")
     
-    print(f"\nZONE-BY-ZONE RESULTS:")
+    print("\nZONE-BY-ZONE RESULTS:")
     print("-" * 80)
     if criterion == 'CIBSE59':
         print(f"{'Zone Name':<20} {'Zone Type':<20} {'Overheating Hours':<18} {'Total Hours':<12} {'Percentage':<12}")
@@ -405,4 +402,4 @@ def print_overheating_analysis_results(results: dict) -> None:
                   f"{zone_data['total_hours']:<12} {zone_data['overheating_percentage']:<12.1f}%")
     
     print("-" * 80)
-    print(f"\nAnalysis completed successfully!")
+    print("\nAnalysis completed successfully!")
