@@ -253,7 +253,7 @@ class EnvelopeCaseSimulator:
                     'Weather_File': self.weather_path,
                     'Num_Workers': self.num_workers,
                     'TEDI_Threshold': SIM_PARAMS.TEDI_THRESHOLD,
-                    'Shading_Config': '2m overhang + fins on south/west facades',
+                    'Shading_Config': '2m overhang + fins on south/west/east facades',
                     'Overheating_Criterion': 'CIBSE59',
                     'Generated_At': datetime.now().isoformat()
                 }
@@ -312,7 +312,7 @@ class EnvelopeCaseSimulator:
             'Weather_File': self.weather_path,
             'Num_Workers': self.num_workers,
             'TEDI_Threshold': SIM_PARAMS.TEDI_THRESHOLD,
-            'Shading_Config': '2m overhang + fins on south/west facades',
+            'Shading_Config': '2m overhang + fins on south/west/east facades',
             'Overheating_Criterion': 'CIBSE59',
             'Generated_At': datetime.now().isoformat()
         }

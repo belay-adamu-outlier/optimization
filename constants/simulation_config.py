@@ -50,6 +50,17 @@ class ShadingConfiguration:
             'overhang': {
                 'depth': 2.0,
                 'angle': 0.0
+            },
+            'left_fin': {'depth': 2.0}
+        }
+        
+    @property
+    def east_facade(self) -> Dict[str, Any]:
+        """West facade: 2m overhang + 2m right fin only (no left fin)."""
+        return {
+            'overhang': {
+                'depth': 2.0,
+                'angle': 90.0
             }
         }
 
@@ -58,7 +69,8 @@ class ShadingConfiguration:
         """Complete shading dimensions for all orientations."""
         return {
             'south': self.south_facade,
-            'west': self.west_facade
+            'west': self.west_facade,
+            'east': self.east_facade
         }
 
 
