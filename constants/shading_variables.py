@@ -23,6 +23,13 @@ SHADING_VARIABLE_KEYS = [
     # 'west_overhang_left_extension_pct',
     'west_overhang_right_extension_pct',
     'west_overhang_height_above',
+    'east_overhang_depth',
+    # 'east_overhang_width',
+    'east_overhang_angle',
+    'east_left_fin_depth',
+    'east_overhang_left_extension_pct',
+    # 'east_overhang_right_extension_pct',
+    'east_overhang_height_above',
 ]
 
 
@@ -32,7 +39,7 @@ SHADING_VARIABLE_KEYS = [
 SHADING_VARIABLE_BOUNDS = {
     'south_overhang_depth': {'min': 0.0, 'max': 2.0},
     # 'south_overhang_width': {'min': 0.0, 'max': 2.0},
-    'south_overhang_angle': {'min': 53, 'max': 180.0},
+    'south_overhang_angle': {'min': 90, 'max': 180.0},
     'south_left_fin_depth': {'min': 0.0, 'max': 2.0},
     'south_right_fin_depth': {'min': 0.0, 'max': 2.0},
     'south_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
@@ -41,11 +48,18 @@ SHADING_VARIABLE_BOUNDS = {
     
     'west_overhang_depth': {'min': 0.0, 'max': 2.0},
     # 'west_overhang_width': {'min': 0.0, 'max': 2.0},
-    'west_overhang_angle': {'min': 53, 'max': 180.0},
+    'west_overhang_angle': {'min': 90, 'max': 180.0},
     'west_right_fin_depth': {'min': 0.0, 'max': 2.0},
-    # 'west_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
+    'west_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
     'west_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
     'west_overhang_height_above': {'min': 0.0, 'max': 1.1},
+    'east_overhang_depth': {'min': 0.0, 'max': 2.0},
+    # 'west_overhang_width': {'min': 0.0, 'max': 2.0},
+    'east_overhang_angle': {'min': 90, 'max': 180.0},
+    'east_left_fin_depth': {'min': 0.0, 'max': 2.0},
+    'east_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
+    'east_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
+    'east_overhang_height_above': {'min': 0.0, 'max': 1.1},
 }
 
 
@@ -67,6 +81,13 @@ SHADING_PENALTY_WEIGHTS = {
     'west_overhang_left_extension_pct': 1.0,
     'west_overhang_right_extension_pct': 1.0,
     'west_overhang_height_above': 1.0,
+    'east_overhang_depth': 3.0,
+    # 'east_overhang_width': 1.0,
+    'east_overhang_angle': 1.0,
+    'east_left_fin_depth': 1.0,
+    'east_overhang_left_extension_pct': 1.0,
+    'east_overhang_right_extension_pct': 1.0,
+    'east_overhang_height_above': 1.0,
 }
 
 
@@ -85,6 +106,9 @@ EXTRA_SHADING_VARIABLE_KEYS = [
     'south_fin_tilt',
     'west_right_fin_extension',
     'west_fin_tilt',
+    'east_overhang_height_above',
+    'east_overhang_left_extension_pct',
+    'east_overhang_right_extension_pct',
 ]
 
 # Merge keys for external use if needed

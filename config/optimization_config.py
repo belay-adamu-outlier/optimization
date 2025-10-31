@@ -377,6 +377,18 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
 
+                params['wwr_east'] = 27.0
+                params['wwr_west'] = 24.0
+                params['wwr_north'] = 20.0
+                params['wwr_south'] = 20.0
+                params['window'] = 'Dbl LoE Elec Ref Colored 6mm/13m Arg - 1001'
+                params['external_wall'] = 'R54 - Wall'
+                params['roof'] = 'R18 - Roof'
+                params['infiltration_ach'] = 0.3
+                params['wall_solar_absorptance'] = 0.32
+                params['roof_solar_absorptance'] = 0.15
+    
+                
                 output_dir = run_simulation(
                     idf_path="BEMs/Building.idf",
                     weather_path=self.weather_file,

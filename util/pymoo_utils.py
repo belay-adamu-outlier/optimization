@@ -154,7 +154,7 @@ def get_params(optimization_type, x, optimization_variables):
             mapping_order = [k for k in declared if k in optimization_variables]
 
             # Sensible inserts for optional keys not in declared list
-            for side in ['south', 'west']:
+            for side in ['south', 'west', 'east']:
                 depth_key = f'{side}_overhang_depth'
                 angle_key = f'{side}_overhang_angle'
                 width_key = f'{side}_overhang_width'
@@ -202,7 +202,7 @@ def get_params(optimization_type, x, optimization_variables):
             if side not in dims:
                 dims[side] = {}
         
-        for side in ['south', 'west']:
+        for side in ['south', 'west', 'east']:
             # Only create blocks for sides where variables were provided
             has_overhang = (f'{side}_overhang_depth' in params)
             if has_overhang:
