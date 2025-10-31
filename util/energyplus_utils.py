@@ -1395,8 +1395,8 @@ def modify_idf(idf, parameters, save=False, save_path=None):
     # Create shading elements if provided as nested dimensions
     shading_dimensions = parameters.get('shading_dimensions')
     if shading_dimensions:
-        idf = create_shading_elements_by_orientation(idf, shading_dimensions)
-        # idf = create_shading_overhangs_and_fins_by_orientation(idf, shading_dimensions)
+        # idf = create_shading_elements_by_orientation(idf, shading_dimensions)
+        idf = create_shading_overhangs_and_fins_by_orientation(idf, shading_dimensions)
 
     # Save the modified IDF file if requested
     if save:
@@ -2183,7 +2183,6 @@ def create_shading_overhangs_and_fins_by_orientation(
     """
     if not dimensions:
         return idf
-
     fenestrations = idf.idfobjects.get('FENESTRATIONSURFACE:DETAILED', [])
     for fen in fenestrations:
         parent_wall_name = getattr(fen, 'Building_Surface_Name', None)
@@ -2198,7 +2197,6 @@ def create_shading_overhangs_and_fins_by_orientation(
             continue
 
         orientation = identify_wall_orientation_by_vertices(parent_wall)
-
         if orientation is None:
             continue
 
