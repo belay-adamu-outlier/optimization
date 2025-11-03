@@ -376,21 +376,9 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 results = generate_dummy_data(params, self.optimization_type, self.overheating_criterion)
             else:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-
-                params['wwr_east'] = 27.0
-                params['wwr_west'] = 24.0
-                params['wwr_north'] = 20.0
-                params['wwr_south'] = 20.0
-                params['window'] = 'Dbl LoE Elec Ref Colored 6mm/13m Arg - 1001'
-                params['external_wall'] = 'R54 - Wall'
-                params['roof'] = 'R18 - Roof'
-                params['infiltration_ach'] = 0.3
-                params['wall_solar_absorptance'] = 0.32
-                params['roof_solar_absorptance'] = 0.15
     
-                
                 output_dir = run_simulation(
-                    idf_path="BEMs/Building_SW_Shading_Renamed - Copy.idf",
+                    idf_path="BEMs/Building.idf",
                     weather_path=self.weather_file,
                     params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
@@ -406,7 +394,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 overheating = results['average_overheating_hours'] or 0.0
-                tedi = district_heating / 320
+                tedi = district_heating / 2590.29
                 lr = results.get('max_living_room_overheating', 0.0) or 0.0
                 br = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
