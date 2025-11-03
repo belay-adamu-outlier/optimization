@@ -42,24 +42,24 @@ SHADING_VARIABLE_BOUNDS = {
     'south_overhang_angle': {'min': 0, 'max': 90.0},
     'south_left_fin_depth': {'min': 0.0, 'max': 2.0},
     'south_right_fin_depth': {'min': 0.0, 'max': 2.0},
-    'south_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
-    'south_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
-    'south_overhang_height_above': {'min': 0.0, 'max': 1.1},
+    # 'south_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'south_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'south_overhang_height_above': {'min': 0.0, 'max': 1.1},
     
     'west_overhang_depth': {'min': 0.0, 'max': 2.0},
     # 'west_overhang_width': {'min': 0.0, 'max': 2.0},
     'west_overhang_angle': {'min': 0, 'max': 90.0},
     'west_right_fin_depth': {'min': 0.0, 'max': 2.0},
-    'west_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
-    'west_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
-    'west_overhang_height_above': {'min': 0.0, 'max': 1.1},
-    'east_overhang_depth': {'min': 0.0, 'max': 2.0},
+    # 'west_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'west_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'west_overhang_height_above': {'min': 0.0, 'max': 1.1},
+    # 'east_overhang_depth': {'min': 0.0, 'max': 2.0},
     # 'west_overhang_width': {'min': 0.0, 'max': 2.0},
-    'east_overhang_angle': {'min': 0, 'max': 90.0},
-    'east_left_fin_depth': {'min': 0.0, 'max': 2.0},
-    'east_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
-    'east_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
-    'east_overhang_height_above': {'min': 0.0, 'max': 1.1},
+    # 'east_overhang_angle': {'min': 0, 'max': 90.0},
+    # 'east_left_fin_depth': {'min': 0.0, 'max': 2.0},
+    # 'east_overhang_left_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'east_overhang_right_extension_pct': {'min': 0.0, 'max': 0.5},
+    # 'east_overhang_height_above': {'min': 0.0, 'max': 1.1},
 }
 
 
@@ -88,6 +88,22 @@ SHADING_PENALTY_WEIGHTS = {
     'east_overhang_left_extension_pct': 1.0,
     'east_overhang_right_extension_pct': 1.0,
     'east_overhang_height_above': 1.0,
+}
+
+
+# Per-variable soft-constraint baselines (M) for penalty evaluation
+#
+# For each variable key, set the baseline value M used in:
+#   g_j(x) = f_j(x) - M,  Q(t) = max(t, 0)^2
+# If a key is not listed here, the default baseline is 0.0.
+#
+# Rationale:
+# - Overhang angles use M=90 so angles at/near 90° are not penalized.
+# - Depths, extensions, and heights keep M=0 to penalize added size.
+SHADING_PENALTY_CONSTRAINTS = {
+    'south_overhang_angle': 90.0,
+    'west_overhang_angle': 90.0,
+    'east_overhang_angle': 90.0,
 }
 
 

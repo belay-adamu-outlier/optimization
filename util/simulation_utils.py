@@ -10,6 +10,7 @@ from constants.shading_variables import (
     SHADING_VARIABLE_KEYS,
     SHADING_VARIABLE_BOUNDS,
     SHADING_PENALTY_WEIGHTS,
+    SHADING_PENALTY_CONSTRAINTS,
 )
 from constants.constraints import (
     LR_OVERHEATING_MAX_HRS,
@@ -48,8 +49,9 @@ def compute_shading_penalty(
             if key not in params:
                 continue
             value = float(params.get(key, 0.0))
-            # Constraint M = 0 for all variables
-            t = max(value - 0.0, 0.0)
+            # Per-variable constraint M (default 0.0)
+            baseline = float(SHADING_PENALTY_CONSTRAINTS.get(key, 0.0))
+            t = max(value - baseline, 0.0)
             q_t = t * t
             weight = float(SHADING_PENALTY_WEIGHTS.get(key, 1.0))
             # Optional normalization by max bound to keep scale moderate

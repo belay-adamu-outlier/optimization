@@ -390,7 +390,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
     
                 
                 output_dir = run_simulation(
-                    idf_path="BEMs/Building.idf",
+                    idf_path="BEMs/Building_SW_Shading_Renamed - Copy.idf",
                     weather_path=self.weather_file,
                     params=params,
                     idd_path="C:/EnergyPlusV9-4-0/Energy+.idd",
@@ -406,7 +406,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
             if results['success']:
                 district_heating = results['district_heating_kwh'] or 0.0
                 overheating = results['average_overheating_hours'] or 0.0
-                tedi = district_heating / 2560
+                tedi = district_heating / 320
                 lr = results.get('max_living_room_overheating', 0.0) or 0.0
                 br = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0

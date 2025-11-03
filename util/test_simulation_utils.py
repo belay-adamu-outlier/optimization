@@ -28,7 +28,11 @@ from .simulation_utils import (
     save_cache_to_file,
     compute_shading_penalty,
 )
-from constants.shading_variables import SHADING_VARIABLE_BOUNDS
+from constants.shading_variables import (
+    SHADING_VARIABLE_BOUNDS,
+    SHADING_PENALTY_WEIGHTS,
+    SHADING_PENALTY_CONSTRAINTS,
+)
 
 
 class TestTemperatureExtraction(unittest.TestCase):
@@ -450,20 +454,31 @@ class TestPenaltyFunction(unittest.TestCase):
         self.assertAlmostEqual(penalty, 0.0, places=8)
 
     def test_penalty_quadratic_normalized(self):
-        # Use half of max for three variables -> each contributes (0.5)^2/(1)^2
-        # since normalization divides by max^2, the term is (v/max)^2.
+        # Use half of max for three variables; expected is weighted average of
+        # normalized squared exceedance above per-variable baselines.
+        keys = [
+            'south_overhang_depth',
+            'south_overhang_angle',
+            'west_right_fin_depth',
+        ]
         params = {
-            'south_overhang_depth': SHADING_VARIABLE_BOUNDS[
-                'south_overhang_depth'
-            ]['max'] * 0.5,
-            'south_overhang_angle': SHADING_VARIABLE_BOUNDS[
-                'south_overhang_angle'
-            ]['max'] * 0.5,
-            'west_right_fin_depth': SHADING_VARIABLE_BOUNDS[
-                'west_right_fin_depth'
-            ]['max'] * 0.5,
+            k: SHADING_VARIABLE_BOUNDS[k]['max'] * 0.5 for k in keys
         }
-        expected = 3 * (0.5 ** 2)
+
+        # Compute expected using current constraints, bounds, and weights
+        penalty_sum = 0.0
+        weight_sum = 0.0
+        for k in keys:
+            v = params[k]
+            baseline = float(SHADING_PENALTY_CONSTRAINTS.get(k, 0.0))
+            max_v = float(SHADING_VARIABLE_BOUNDS[k]['max'])
+            t = max(v - baseline, 0.0)
+            q_t = (t * t) / (max_v * max_v) if max_v > 0 else 0.0
+            w = float(SHADING_PENALTY_WEIGHTS.get(k, 1.0))
+            penalty_sum += w * q_t
+            weight_sum += w
+        expected = penalty_sum / weight_sum if weight_sum > 0 else 0.0
+
         penalty = compute_shading_penalty(
             params, SHADING_VARIABLE_BOUNDS, 'shading'
         )
