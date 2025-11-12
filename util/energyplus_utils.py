@@ -15,6 +15,10 @@ from .simulation_utils import extract_district_heating_from_htm, parse_eso_file,
 from overheating_analysis import analyze_overheating_with_ASHRAE, analyze_overheating_with_CIBSE59
 import numpy as np
 from typing import Dict, Tuple, List, Optional, Any, Set
+from constants.infiltration import (
+    DEFAULT_INFILTRATION_FACTOR,
+    INFILTRATION_ZONE_FACTORS,
+)
 
 def _collect_vertices(surface, count: int = 4) -> Tuple[List[float], List[float], List[float]]:
     """Return lists of x, y, z from up to 4 vertices on a surface.
@@ -971,39 +975,50 @@ def apply_construction_to_surfaces(idf, construction_name, surface_type):
 
 def apply_infiltration_to_zones(idf, infiltration_ach_50pa):
     """
-    Apply infiltration rate to all zones.
+    Apply infiltration design flow rates to all zones using the Flow/Zone method.
     
     Args:
         idf: IDF object
         infiltration_ach_50pa (float): Infiltration rate in ACH at 50 Pa
-    """
-    # Convert ACH at 50 Pa to ambient conditions (divide by 20 for typical conversion)
-    infiltration_ach_ambient = infiltration_ach_50pa / 16
     
-    zones = idf.idfobjects['ZONE']
+    Raises:
+        ValueError: If a zone volume is missing or non-positive.
+    """
+    zones = idf.idfobjects.get('ZONE', [])
+    infiltration_objects = idf.idfobjects.get('ZONEINFILTRATION:DESIGNFLOWRATE', [])
+    infiltration_by_zone = {
+        obj.Zone_or_ZoneList_Name: obj for obj in infiltration_objects
+    }
     
     for zone in zones:
         zone_name = zone.Name
+        volume_raw = getattr(zone, 'Volume', None)
         
-        # Check if infiltration object already exists for this zone
-        existing_infiltration = None
-        for infiltration in idf.idfobjects['ZONEINFILTRATION:DESIGNFLOWRATE']:
-            if infiltration.Zone_or_ZoneList_Name == zone_name:
-                existing_infiltration = infiltration
-                break
+        try:
+            volume = float(volume_raw)
+        except (TypeError, ValueError):
+            raise ValueError(f'invalid volume specified for zone {zone_name}')
         
-        if existing_infiltration:
-            # Update existing infiltration - clear Design_Flow_Rate and set Air_Changes_per_Hour
-            existing_infiltration.Design_Flow_Rate = ''
-            existing_infiltration.Air_Changes_per_Hour = infiltration_ach_ambient
-            existing_infiltration.Design_Flow_Rate_Calculation_Method = 'AirChanges/Hour'
-        else:
-            # Create new infiltration object
+        if volume <= 0:
+            raise ValueError(f'invalid volume specified for zone {zone_name}')
+        
+        factor = INFILTRATION_ZONE_FACTORS.get(
+            zone_name,
+            DEFAULT_INFILTRATION_FACTOR,
+        )
+        design_flow = infiltration_ach_50pa * factor * volume / 3600.0
+        
+        infiltration = infiltration_by_zone.get(zone_name)
+        if infiltration is None:
             infiltration = idf.newidfobject('ZONEINFILTRATION:DESIGNFLOWRATE')
             infiltration.Zone_or_ZoneList_Name = zone_name
-            infiltration.Design_Flow_Rate = ''  # Clear this field
-            infiltration.Air_Changes_per_Hour = infiltration_ach_ambient  # Set converted ACH
-            infiltration.Design_Flow_Rate_Calculation_Method = 'AirChanges/Hour'
+            infiltration_by_zone[zone_name] = infiltration
+        
+        infiltration.Design_Flow_Rate = design_flow
+        infiltration.Flow_per_Zone_Floor_Area = ''
+        infiltration.Flow_per_Exterior_Surface_Area = ''
+        infiltration.Air_Changes_per_Hour = ''
+        infiltration.Design_Flow_Rate_Calculation_Method = 'Flow/Zone'
 
 
 def calculate_window_geometry(
