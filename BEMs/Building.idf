@@ -72,7 +72,7 @@ SurfaceConvectionAlgorithm:Outside,
 HeatBalanceAlgorithm,
     ConductionTransferFunction,  !- Algorithm
     2000,                    !- Surface Temperature Upper Limit {C}
-    0.00000001,              !- Minimum Surface Convection Heat Transfer Coefficient Value {W/m2-K}
+    0.1,                     !- Minimum Surface Convection Heat Transfer Coefficient Value {W/m2-K}
     1000;                    !- Maximum Surface Convection Heat Transfer Coefficient Value {W/m2-K}
 
 
