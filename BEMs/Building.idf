@@ -6386,6 +6386,15 @@ Material:InfraredTransparent,
     IRTMaterial;             !- Name
 
 
+!-   ===========  ALL OBJECTS IN CLASS: WINDOWMATERIAL:SIMPLEGLAZINGSYSTEM ===========
+
+WindowMaterial:SimpleGlazingSystem,
+    Bauwerk Thermal Vinyl/uPVC Tilt + Turn Window,  !- Name
+    0.85,                    !- U-Factor {W/m2-K}
+    0.14,                    !- Solar Heat Gain Coefficient
+    0.35;                    !- Visible Transmittance
+
+
 !-   ===========  ALL OBJECTS IN CLASS: WINDOWMATERIAL:GLAZING ===========
 
 WindowMaterial:Glazing,
@@ -12861,6 +12870,10 @@ Construction,
     906,                     !- Layer 3
     1008,                    !- Layer 4
     2933 Flipped;            !- Layer 5
+
+Construction,
+    Bauwerk Thermal Vinyl,   !- Name
+    Bauwerk Thermal Vinyl/uPVC Tilt + Turn Window;  !- Outside Layer
 
 
 !-   ===========  ALL OBJECTS IN CLASS: GLOBALGEOMETRYRULES ===========
