@@ -13,7 +13,7 @@ from dataclasses import dataclass
 @dataclass
 class FilePaths:
     """File paths for simulation inputs and outputs."""
-    CSV_INPUT: str = "data/AMY_envelope_optimization_final.csv"
+    CSV_INPUT: str = "data/AMY_envelope_optimization_final - Copy.csv"
     IDF_TEMPLATE: str = "BEMs/Building.idf"
     WEATHER_FILE: str = "BEMs/Vancouver - 2021 AMY.epw"
     IDD_PATH: str = "C:/EnergyPlusV9-4-0/Energy+.idd"
@@ -60,7 +60,7 @@ class ShadingConfiguration:
         return {
             'overhang': {
                 'depth': 2.0,
-                'angle': 90.0
+                'angle': 0.0
             }
         }
 
