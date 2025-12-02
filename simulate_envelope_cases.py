@@ -149,7 +149,7 @@ class EnvelopeCaseSimulator:
 
         results = analyze_simulation_results(
             output_dir,
-            cleanup=False,  # Clean up after analysis
+            cleanup=True,  # Clean up after analysis
             overheating_criterion='CIBSE59'
         )
 

@@ -1408,9 +1408,9 @@ def modify_idf(idf, parameters, save=False, save_path=None):
         idf = apply_shading_schedules_to_idf(idf, parameters['shading_schedule'])
 
     # Create shading elements if provided as nested dimensions
-    # shading_dimensions = parameters.get('shading_dimensions')
-    # if shading_dimensions:
-    #     idf = create_shading_elements_by_orientation(idf, shading_dimensions)
+    shading_dimensions = parameters.get('shading_dimensions')
+    if shading_dimensions:
+        idf = create_shading_elements_by_orientation(idf, shading_dimensions)
         # idf = create_shading_overhangs_and_fins_by_orientation(idf, shading_dimensions)
 
     # Save the modified IDF file if requested
