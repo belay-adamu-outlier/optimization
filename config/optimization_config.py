@@ -221,9 +221,16 @@ class EvaluationCallback(Callback):
             if not isinstance(entry, dict) or 'objectives' not in entry:
                 continue
 
-            tedi, overheating = entry['objectives']
+            tedi_raw, overheating = entry['objectives']
             generation = entry.get('generation', 0)
             params = entry.get('params') or {}
+
+            is_shading = self.optimization_type in ('shading', 'shading_wwr')
+            tedi = compute_shading_penalty(
+                params,
+                self.optimization_variables,
+                self.optimization_type,
+            ) if is_shading else tedi_raw
 
             solution = {
                 'generation': generation,
@@ -255,13 +262,11 @@ class EvaluationCallback(Callback):
             self.solutions_by_generation.setdefault(generation, []).append(combination_key)
 
             if self.optimization_type == 'shading_wwr':
-                # 3 objectives: [TEDI_with_penalty, -WWR_south, -WWR_west]
-                penalty = compute_shading_penalty(params, self.optimization_variables, self.optimization_type)
+                # 3 objectives: [penalty, -WWR_south, -WWR_west]
                 wwr_s = float(params.get('wwr_south', 0.0) or 0.0)
                 wwr_w = float(params.get('wwr_west', 0.0) or 0.0)
-                solution['tedi_with_penalty'] = float(tedi) + penalty
                 self.all_objectives.append([
-                    float(tedi) + penalty,
+                    float(tedi),
                     -wwr_s,
                     -wwr_w,
                 ])
@@ -399,15 +404,19 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 br = results.get('max_bedroom_overheating', 0.0) or 0.0
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
                 total_area = results.get('total_shading_area', 0.0) or 0.0
-                # Store raw objectives in cache; apply penalty now for optimizer
+                penalty = compute_shading_penalty(
+                    params,
+                    self.optimization_variables,
+                    self.optimization_type,
+                )
+                if self.optimization_type in ('shading', 'shading_wwr'):
+                    tedi = penalty
+                # Store objectives in cache (TEDI replaced by penalty for shading)
                 objectives_raw = [tedi, overheating]
-                penalty = compute_shading_penalty(params, self.optimization_variables, self.optimization_type)
-                tedi_with_penalty = tedi + penalty
             else:
                 tedi = 1000.0
                 overheating = 1000.0
                 objectives_raw = [tedi, overheating]
-                tedi_with_penalty = tedi
                 lr, br, max_overheating_hours, total_area = 1000.0, 1000.0, 0.0, 1000.0
 
             if self.shared_cache is not None:
@@ -430,15 +439,15 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 # Build WWR objectives here (no penalty on WWRs)
                 f_wwr_s = -float(params.get('wwr_south') or 0.0)
                 f_wwr_w = -float(params.get('wwr_west') or 0.0)
-                out['F'] = [tedi_with_penalty, f_wwr_s, f_wwr_w]
+                out['F'] = [tedi, f_wwr_s, f_wwr_w]
                 if self.constrained_analysis:
                     out['G'] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
                 return
 
             if not self.constrained_analysis:
-                out["F"] = [tedi_with_penalty, overheating]
+                out["F"] = [tedi, overheating]
                 return
-            out["F"] = [tedi_with_penalty]
+            out["F"] = [tedi]
             out["G"] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
             return
             

@@ -44,29 +44,26 @@ def compute_shading_penalty(
             return 0.0
 
         penalty_sum = 0.0
-        weight_sum = 0.0
         for key in SHADING_VARIABLE_KEYS:
             if key not in params:
                 continue
             value = float(params.get(key, 0.0))
             # Per-variable constraint M (default 0.0)
             baseline = float(SHADING_PENALTY_CONSTRAINTS.get(key, 0.0))
-            t = max(value - baseline, 0.0)
-            q_t = t * t
+            if key in ('south_overhang_angle', 'west_overhang_angle', 'east_overhang_angle'):
+                t = max(baseline - value, 0.0)
+            else:
+                t = max(value - baseline, 0.0)
+            bounds = SHADING_VARIABLE_BOUNDS.get(key) or {}
+            max_v = bounds.get('max')
+            min_v = bounds.get('min', 0.0)
+            span = float(max_v - min_v) if max_v is not None else 0.0
+            if span <= 0.0:
+                continue
+            q_t = (t / span) * (t / span)
             weight = float(SHADING_PENALTY_WEIGHTS.get(key, 1.0))
-            # Optional normalization by max bound to keep scale moderate
-            bounds = (
-                (optimization_variables or {}).get(key)
-                or SHADING_VARIABLE_BOUNDS.get(key)
-                or {}
-            )
-            max_v = bounds.get('max', None)
-            if max_v and max_v > 0:
-                q_t = q_t / (float(max_v) ** 2)
             penalty_sum += weight * q_t
-            weight_sum += weight
-
-        return float(penalty_sum / weight_sum)
+        return float(penalty_sum)
     except Exception:
         return 0.0
 
@@ -530,16 +527,16 @@ def populate_with_cache(
         optimization_variables or {},
         optimization_type or ''
     )
-    tedi_penalized = tedi_raw + penalty
+    is_shading = (optimization_type or '').lower() in ('shading', 'shading_wwr')
+    tedi = penalty if is_shading else tedi_raw
 
     # For shading_wwr, return 3 objectives: [TEDI_pen, -WWR_south, -WWR_west]
     if (optimization_type or '').lower() == 'shading_wwr':
         wwr_s = float(params.get('wwr_south') or 0.0)
         wwr_w = float(params.get('wwr_west') or 0.0)
-        # Penalize only TEDI to avoid distorting WWR trade-offs
-        out["F"] = [tedi_penalized, -wwr_s, -wwr_w]
+        out["F"] = [tedi, -wwr_s, -wwr_w]
     else:
-        out["F"] = [tedi_penalized] if is_constrained_analysis else [tedi_penalized, overheating]
+        out["F"] = [tedi] if is_constrained_analysis else [tedi, overheating]
 
     # Constraints (overheating only)
     lr = cached_entry.get('max_living_room_overheating', 0.0) or 0.0

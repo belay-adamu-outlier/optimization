@@ -573,7 +573,7 @@ def save_final_results(
             # Use transformed objectives: [TEDI_with_penalty, -wwr_south, -wwr_west]
             F = np.array([
                 [
-                    s.get('tedi_with_penalty', s.get('thermal_energy_demand_intensity', 0.0)),
+                    s.get('thermal_energy_demand_intensity', 0.0),
                     -float(s.get('wwr_south') or 0.0),
                     -float(s.get('wwr_west') or 0.0),
                 ]

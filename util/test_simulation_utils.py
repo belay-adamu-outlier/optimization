@@ -451,11 +451,13 @@ class TestPenaltyFunction(unittest.TestCase):
         penalty = compute_shading_penalty(
             params, SHADING_VARIABLE_BOUNDS, 'shading'
         )
-        self.assertAlmostEqual(penalty, 0.0, places=8)
+        # Angles target 90; depths at 0 produce zero; angles at 0 produce penalty.
+        expected = 3.0 * 1.0 + 3.0 * 1.0 + 3.0 * 1.0
+        self.assertAlmostEqual(penalty, expected, places=8)
 
-    def test_penalty_quadratic_normalized(self):
-        # Use half of max for three variables; expected is weighted average of
-        # normalized squared exceedance above per-variable baselines.
+    def test_penalty_quadratic(self):
+        # Use half of max for three variables; expected is weighted sum of
+        # squared, range-normalized exceedance above per-variable baselines.
         keys = [
             'south_overhang_depth',
             'south_overhang_angle',
@@ -467,17 +469,19 @@ class TestPenaltyFunction(unittest.TestCase):
 
         # Compute expected using current constraints, bounds, and weights
         penalty_sum = 0.0
-        weight_sum = 0.0
         for k in keys:
             v = params[k]
             baseline = float(SHADING_PENALTY_CONSTRAINTS.get(k, 0.0))
-            max_v = float(SHADING_VARIABLE_BOUNDS[k]['max'])
-            t = max(v - baseline, 0.0)
-            q_t = (t * t) / (max_v * max_v) if max_v > 0 else 0.0
+            bounds = SHADING_VARIABLE_BOUNDS[k]
+            if 'angle' in k:
+                t = max(baseline - v, 0.0)
+            else:
+                t = max(v - baseline, 0.0)
+            span = float(bounds['max'] - bounds.get('min', 0.0))
+            q_t = (t / span) * (t / span) if span > 0 else 0.0
             w = float(SHADING_PENALTY_WEIGHTS.get(k, 1.0))
             penalty_sum += w * q_t
-            weight_sum += w
-        expected = penalty_sum / weight_sum if weight_sum > 0 else 0.0
+        expected = penalty_sum
 
         penalty = compute_shading_penalty(
             params, SHADING_VARIABLE_BOUNDS, 'shading'

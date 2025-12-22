@@ -65,7 +65,7 @@ SHADING_VARIABLE_BOUNDS = {
 
 # Optional weights for penalty aggregation. Keep all as 1.0 by default.
 SHADING_PENALTY_WEIGHTS = {
-    'south_overhang_depth': 3.0,
+    'south_overhang_depth': 2.0,
     # 'south_overhang_width': 1.0,
     'south_overhang_left_extension_pct': 1.0,
     'south_overhang_right_extension_pct': 1.0,
@@ -74,16 +74,16 @@ SHADING_PENALTY_WEIGHTS = {
     'south_left_fin_depth': 1.0,
     'south_right_fin_depth': 1.0,
         
-    'west_overhang_depth': 3.0,
+    'west_overhang_depth': 2.0,
     # 'west_overhang_width': 1.0,
-    'west_overhang_angle': 1.0,
+    'west_overhang_angle': 3.0,
     'west_right_fin_depth': 1.0,
     'west_overhang_left_extension_pct': 1.0,
     'west_overhang_right_extension_pct': 1.0,
     'west_overhang_height_above': 1.0,
-    'east_overhang_depth': 3.0,
+    'east_overhang_depth': 2.0,
     # 'east_overhang_width': 1.0,
-    'east_overhang_angle': 1.0,
+    'east_overhang_angle': 3.0,
     'east_left_fin_depth': 1.0,
     'east_overhang_left_extension_pct': 1.0,
     'east_overhang_right_extension_pct': 1.0,
