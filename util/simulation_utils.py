@@ -15,6 +15,7 @@ from constants.shading_variables import (
 from constants.constraints import (
     LR_OVERHEATING_MAX_HRS,
     BR_OVERHEATING_MAX_HRS,
+    TEDI_MAX_VALUE,
 )
 
 
@@ -538,10 +539,14 @@ def populate_with_cache(
     else:
         out["F"] = [tedi] if is_constrained_analysis else [tedi, overheating]
 
-    # Constraints (overheating only)
+    # Constraints must match the declared constrained problem shape.
     lr = cached_entry.get('max_living_room_overheating', 0.0) or 0.0
     br = cached_entry.get('max_bedroom_overheating', 0.0) or 0.0
     if is_constrained_analysis:
-        out["G"] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
+        out["G"] = [
+            lr - LR_OVERHEATING_MAX_HRS,
+            br - BR_OVERHEATING_MAX_HRS,
+            tedi - TEDI_MAX_VALUE,
+        ]
 
     return True

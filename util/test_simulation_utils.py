@@ -27,6 +27,12 @@ from .simulation_utils import (
     get_generation_from_cache,
     save_cache_to_file,
     compute_shading_penalty,
+    populate_with_cache,
+)
+from constants.constraints import (
+    LR_OVERHEATING_MAX_HRS,
+    BR_OVERHEATING_MAX_HRS,
+    TEDI_MAX_VALUE,
 )
 from constants.shading_variables import (
     SHADING_VARIABLE_BOUNDS,
@@ -322,6 +328,41 @@ class TestSharedCacheFunctions(unittest.TestCase):
         result = get_generation_from_cache(cache, 'nonexistent')
         
         self.assertIsNone(result)
+
+    def test_populate_with_cache_returns_three_constraints(self):
+        """Test constrained cache hits return all 3 constraints."""
+        cache = create_shared_cache()
+        params = {'test': 'value'}
+        key = make_cache_key(params)
+
+        cache[key] = {
+            'objectives': [100.0, 25.0],
+            'params': params,
+            'max_living_room_overheating': 150.0,
+            'max_bedroom_overheating': 40.0,
+        }
+
+        out = {}
+
+        populated = populate_with_cache(
+            cache,
+            key,
+            True,
+            out,
+            optimization_type='envelope',
+            optimization_variables={},
+        )
+
+        self.assertTrue(populated)
+        self.assertEqual(out['F'], [100.0])
+        self.assertEqual(
+            out['G'],
+            [
+                150.0 - LR_OVERHEATING_MAX_HRS,
+                40.0 - BR_OVERHEATING_MAX_HRS,
+                100.0 - TEDI_MAX_VALUE,
+            ],
+        )
     
     def test_save_cache_to_file_basic(self):
         """Test basic cache saving to file."""

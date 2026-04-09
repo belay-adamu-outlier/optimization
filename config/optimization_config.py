@@ -50,6 +50,7 @@ import os
 from constants.constraints import (
     LR_OVERHEATING_MAX_HRS,
     BR_OVERHEATING_MAX_HRS,
+    TEDI_MAX_VALUE
 )
 class EvaluationCallback(Callback):
     def __init__(
@@ -317,7 +318,11 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 xu[i] = len(var_options) - 1
             vtype = int
 
-        n_ieq_constr = get_problem_constraints(optimization_type, constrained_analysis, overheating_criterion)
+        n_ieq_constr = get_problem_constraints(
+            optimization_type, 
+            constrained_analysis, 
+            overheating_criterion
+        )
 
         # Determine number of objectives
         if optimization_type == 'shading_wwr':
@@ -441,14 +446,14 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 f_wwr_w = -float(params.get('wwr_west') or 0.0)
                 out['F'] = [tedi, f_wwr_s, f_wwr_w]
                 if self.constrained_analysis:
-                    out['G'] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
+                    out['G'] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS, tedi - TEDI_MAX_VALUE]
                 return
 
             if not self.constrained_analysis:
                 out["F"] = [tedi, overheating]
                 return
             out["F"] = [tedi]
-            out["G"] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS]
+            out["G"] = [lr - LR_OVERHEATING_MAX_HRS, br - BR_OVERHEATING_MAX_HRS, tedi - TEDI_MAX_VALUE]
             return
             
         except Exception as _:
@@ -458,7 +463,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 out['F'] = [1000.0] if self.constrained_analysis else [1000.0, 1000.0]
             if not self.constrained_analysis:
                 return
-            out["G"] = [1000.0, 1000.0]
+            out["G"] = [1000.0, 1000.0, 1000.0]
 
     def _is_feasible(self, lr: float, br: float) -> bool:
         """Return True if solution respects overheating constraints.

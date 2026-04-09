@@ -13,6 +13,11 @@ import tempfile
 import os
 import json
 from unittest.mock import Mock, patch
+from constants.constraints import (
+    LR_OVERHEATING_MAX_HRS,
+    BR_OVERHEATING_MAX_HRS,
+    TEDI_MAX_VALUE,
+)
 
 # Import the functions we want to test
 from main import (
@@ -214,8 +219,10 @@ class TestBuildingEnvelopeProblem:
         assert out["F"][0] == 1.0  # TEDI only
         
         # Check that constraints were set
-        assert len(out["G"]) == 1
-        assert out["G"][0] == -10.0  # 20 - 30 = -10 (within constraint)
+        assert len(out["G"]) == 3
+        assert out["G"][0] == -LR_OVERHEATING_MAX_HRS
+        assert out["G"][1] == -BR_OVERHEATING_MAX_HRS
+        assert out["G"][2] == 1.0 - TEDI_MAX_VALUE
     
     @patch('main.run_simulation')
     @patch('main.analyze_simulation_results')
@@ -357,9 +364,40 @@ class TestBuildingEnvelopeProblem:
             problem._evaluate(x, out)
             
             # Check constraints (should be positive when exceeding limits)
-            assert len(out["G"]) == 2
-            assert out["G"][0] == 40.0   # 150 - 110 = 40 (constraint limit is 110, not 120)
-            assert out["G"][1] == 8.0    # 40 - 32 = 8
+            assert len(out["G"]) == 3
+            assert out["G"][0] == 40.0
+            assert out["G"][1] == 8.0
+            assert out["G"][2] == 1.0 - TEDI_MAX_VALUE
+
+    def test_evaluate_cached_result_constrained(self):
+        """Test cached constrained evaluation returns 3 constraints."""
+        self.shared_cache['cached_key'] = {
+            'objectives': [100.0, 25.0],
+            'max_overheating_hours': 30.0,
+            'max_living_room_overheating': 150.0,
+            'max_bedroom_overheating': 40.0,
+            'params': {},
+        }
+
+        problem = BuildingEnvelopeProblem(
+            optimization_variables=self.optimization_variables,
+            shared_cache=self.shared_cache,
+            weather_file=self.weather_file,
+            constrained_analysis=True,
+        )
+
+        with patch('main.make_cache_key', return_value='cached_key'):
+            x = np.array([0, 1, 0])
+            out = {}
+
+            problem._evaluate(x, out)
+
+            assert len(out['F']) == 1
+            assert out['F'][0] == 100.0
+            assert len(out['G']) == 3
+            assert out['G'][0] == 40.0
+            assert out['G'][1] == 8.0
+            assert out['G'][2] == 100.0 - TEDI_MAX_VALUE
     
     def test_evaluate_with_shared_cache_none(self):
         """Test evaluation when shared_cache is None."""
