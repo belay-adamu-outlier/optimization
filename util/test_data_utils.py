@@ -287,6 +287,8 @@ class TestPrintFunctions:
                 'average_overheating_hours': 20.0,
                 'max_living_room_overheating': 30.0,
                 'max_bedroom_overheating': 25.0,
+                'max_living_room_overheating_zone': 'SW:LR',
+                'max_bedroom_overheating_zone': 'NE:BR',
                 'pareto_optimal': True,
                 'external_wall': 'R17 - Wall',
             },
@@ -316,6 +318,10 @@ class TestPrintFunctions:
         out = capsys.readouterr().out
         # Row for Gen=1 Iter=1 has fixed-width tokens: '1  ' and '1   ' joined with a space
         assert out.count('1   1   ') == 1
+        assert 'Max_LR_Zone' in out
+        assert 'Max_BR_Zone' in out
+        assert 'SW:LR' in out
+        assert 'NE:BR' in out
 
     def test_print_optimization_table_shading_formatting(self, capsys):
         """Shading table should include Total_Shading_Area and Pareto mark once."""
@@ -345,6 +351,8 @@ class TestPrintFunctions:
         assert 'Total_Shading_Area' in out
         # Value formatted to 2 decimals should appear
         assert '123.46' in out
+        assert 'Max_LR_Zone' in out
+        assert 'Max_BR_Zone' in out
 
 
 class TestParameterConversion:
@@ -475,7 +483,7 @@ class TestCSVOperations:
             assert 'Optimization Metadata' in content
             assert 'Algorithm: NSGA-II' in content
             assert 'Generations: 100' in content
-            assert 'Generation,Iteration,external_wall,roof,window,Thermal_Energy_Demand_Intensity,Average_Overheating_Hours,Pareto_Optimal' in content
+            assert 'Generation,Iteration,external_wall,roof,window,Thermal_Energy_Demand_Intensity,Average_Overheating_Hours,Max_Living_Room_Overheating,Max_Bedroom_Overheating,Max_Living_Room_Overheating_Zone,Max_Bedroom_Overheating_Zone,Pareto_Optimal' in content
     
     def test_initialize_csv_shading(self):
         """Test CSV initialization for shading optimization."""
@@ -498,7 +506,49 @@ class TestCSVOperations:
         # Check file contents
         with open(csv_filename, 'r') as f:
             content = f.read()
-            assert 'Generation,Iteration,Shading_Schedule,Thermal_Energy_Demand_Intensity,Max_Living_Room_Overheating,Max_Bedroom_Overheating,Pareto_Optimal' in content
+            assert 'Generation,Iteration,Shading_Schedule,Thermal_Energy_Demand_Intensity,Max_Living_Room_Overheating,Max_Bedroom_Overheating,Max_Living_Room_Overheating_Zone,Max_Bedroom_Overheating_Zone,Pareto_Optimal' in content
+
+    def test_initialize_csv_envelope_constrained_cibse59(self):
+        """Test CSV header includes zone columns for constrained CIBSE59."""
+        metadata = {'Algorithm': 'NSGA-II', 'Generations': 100}
+        variable_names = ['external_wall', 'roof', 'window']
+
+        csv_filename = 'test_envelope_cibse59.csv'
+        initialize_csv(
+            csv_filename,
+            metadata,
+            variable_names,
+            problem_type='envelope',
+            constrained_analysis=True,
+            overheating_criterion='CIBSE59'
+        )
+
+        assert os.path.exists(csv_filename)
+
+        with open(csv_filename, 'r') as f:
+            content = f.read()
+            assert 'Generation,Iteration,external_wall,roof,window,Thermal_Energy_Demand_Intensity,Max_Living_Room_Overheating,Max_Bedroom_Overheating,Max_Living_Room_Overheating_Zone,Max_Bedroom_Overheating_Zone' in content
+
+    def test_initialize_csv_envelope_constrained_ashrae(self):
+        """Test CSV header includes zone column for constrained ASHRAE."""
+        metadata = {'Algorithm': 'NSGA-II', 'Generations': 100}
+        variable_names = ['external_wall', 'roof', 'window']
+
+        csv_filename = 'test_envelope_ashrae.csv'
+        initialize_csv(
+            csv_filename,
+            metadata,
+            variable_names,
+            problem_type='envelope',
+            constrained_analysis=True,
+            overheating_criterion='ASHRAE'
+        )
+
+        assert os.path.exists(csv_filename)
+
+        with open(csv_filename, 'r') as f:
+            content = f.read()
+            assert 'Generation,Iteration,external_wall,roof,window,Thermal_Energy_Demand_Intensity,Max_Overheating_Hours,Max_Overheating_Zone' in content
 
 
 class TestDummyDataGeneration:
@@ -520,12 +570,13 @@ class TestDummyDataGeneration:
         assert 'max_overheating_hours' in results
         assert results['max_living_room_overheating'] is None
         assert results['max_bedroom_overheating'] is None
+        assert results['max_overheating_zone']
         
         # Check that values are reasonable
-        # With test params: 'R17 - Wall'(12) + 'R70 - Roof'(9) + 'Trp LoE Film'(13) = 34 chars
-        # So district_heating = random(500,2000) + 34*100 = random(500,2000) + 3400 = 3900-5400
-        # average_overheating = random(0,100) + 34*5 = random(0,100) + 170 = 170-270
-        assert 3900 <= results['district_heating_kwh'] <= 5400
+        # With test params: 'R17 - Wall'(10) + 'R70 - Roof'(10) + 'Trp LoE Film'(12) = 32 chars
+        # So district_heating = random(500,2000) + 32*100 = random(500,2000) + 3200 = 3700-5200
+        # average_overheating = 170 + random(0,100) = 170-270
+        assert 3700 <= results['district_heating_kwh'] <= 5200
         assert 170 <= results['average_overheating_hours'] <= 270
         assert 0 <= results['max_overheating_hours'] <= 200
     
@@ -545,13 +596,15 @@ class TestDummyDataGeneration:
         assert 'max_overheating_hours' in results
         assert 'max_living_room_overheating' in results
         assert 'max_bedroom_overheating' in results
+        assert results['max_living_room_overheating_zone']
+        assert results['max_bedroom_overheating_zone']
         
         # Check that values are reasonable
-        # With test params: 'R17 - Wall'(12) + 'R70 - Roof'(9) + 'Trp LoE Film'(13) = 34 chars
-        # So district_heating = random(500,2000) + 34*100 = random(500,2000) + 3400 = 3900-5400
-        # average_overheating = random(0,50) + 34*2 = random(0,50) + 68 = 68-118
-        assert 3900 <= results['district_heating_kwh'] <= 5400
-        assert 68 <= results['average_overheating_hours'] <= 118
+        # With test params: 'R17 - Wall'(10) + 'R70 - Roof'(10) + 'Trp LoE Film'(12) = 32 chars
+        # So district_heating = random(500,2000) + 32*100 = random(500,2000) + 3200 = 3700-5200
+        # average_overheating = random(0,50) + 32*2 = random(0,50) + 64 = 64-114
+        assert 3700 <= results['district_heating_kwh'] <= 5200
+        assert 64 <= results['average_overheating_hours'] <= 114
         assert 15 <= results['max_living_room_overheating'] <= 80
         assert 15 <= results['max_bedroom_overheating'] <= 80
     
@@ -566,6 +619,9 @@ class TestDummyDataGeneration:
         assert 'average_overheating_hours' in results
         assert 'max_living_room_overheating' in results
         assert 'max_bedroom_overheating' in results
+        assert results['max_living_room_overheating_zone']
+        assert results['max_bedroom_overheating_zone']
+        assert results['max_overheating_zone']
         
         # Check that values are reasonable
         assert 70 <= results['district_heating_kwh'] / 2590.29 <= 120  # TEDI range

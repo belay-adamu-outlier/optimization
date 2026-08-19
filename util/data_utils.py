@@ -154,7 +154,9 @@ def print_optimization_table(
     header_parts.extend([
             f"{'TEDI':<8}",
             f"{'Max_LR_OH':<12}",
-            f"{'Max_BR_OH':<12}"]
+            f"{'Max_LR_Zone':<14}",
+            f"{'Max_BR_OH':<12}",
+            f"{'Max_BR_Zone':<14}"]
     )
     
     # Add objective columns based on problem type and analysis settings
@@ -220,7 +222,9 @@ def print_optimization_table(
         line_parts.extend([
                 f"{result['thermal_energy_demand_intensity']:<8.3f}",
                 f"{result.get('max_living_room_overheating', 0.0):<12.1f}",
-                f"{result.get('max_bedroom_overheating', 0.0):<12.1f}"
+                f"{str(result.get('max_living_room_overheating_zone', '') or ''):<14}",
+                f"{result.get('max_bedroom_overheating', 0.0):<12.1f}",
+                f"{str(result.get('max_bedroom_overheating_zone', '') or ''):<14}"
         ])
         
         # Add objective values based on problem type and analysis settings
@@ -392,17 +396,32 @@ def _objective_headers(problem_type, constrained_analysis, overheating_criterion
         return [
             'Thermal_Energy_Demand_Intensity',
             'Max_Living_Room_Overheating',
-            'Max_Bedroom_Overheating'
+            'Max_Bedroom_Overheating',
+            'Max_Living_Room_Overheating_Zone',
+            'Max_Bedroom_Overheating_Zone'
         ]
     if constrained_analysis:
         if overheating_criterion.upper() == 'CIBSE59':
             return [
                 'Thermal_Energy_Demand_Intensity',
                 'Max_Living_Room_Overheating',
-                'Max_Bedroom_Overheating'
+                'Max_Bedroom_Overheating',
+                'Max_Living_Room_Overheating_Zone',
+                'Max_Bedroom_Overheating_Zone'
             ]
-        return ['Thermal_Energy_Demand_Intensity', 'Max_Overheating_Hours']
-    return ['Thermal_Energy_Demand_Intensity', 'Average_Overheating_Hours']
+        return [
+            'Thermal_Energy_Demand_Intensity',
+            'Max_Overheating_Hours',
+            'Max_Overheating_Zone'
+        ]
+    return [
+        'Thermal_Energy_Demand_Intensity',
+        'Average_Overheating_Hours',
+        'Max_Living_Room_Overheating',
+        'Max_Bedroom_Overheating',
+        'Max_Living_Room_Overheating_Zone',
+        'Max_Bedroom_Overheating_Zone'
+    ]
 
 
 def _csv_fieldnames(
@@ -418,21 +437,17 @@ def _csv_fieldnames(
     if problem_type == 'shading':
         # For shading problems, include optimization variables first, then objectives
         vars_part = variable_names or ['Shading_Schedule']
-        objs = [
-            'Thermal_Energy_Demand_Intensity',
-            'Max_Living_Room_Overheating',
-            'Max_Bedroom_Overheating'
-        ]
+        objs = _objective_headers(
+            problem_type, constrained_analysis, overheating_criterion
+        )
         tail = ['Pareto_Optimal'] if multiobjective else []
         return base + vars_part + objs + tail
     if problem_type == 'shading_wwr':
         # Similar to shading; still record shading objectives and include Pareto column
         vars_part = variable_names or []
-        objs = [
-            'Thermal_Energy_Demand_Intensity',
-            'Max_Living_Room_Overheating',
-            'Max_Bedroom_Overheating'
-        ]
+        objs = _objective_headers(
+            problem_type, constrained_analysis, overheating_criterion
+        )
         tail = ['Pareto_Optimal'] if multiobjective else []
         return base + vars_part + objs + tail
     
@@ -472,6 +487,8 @@ def _format_row(
         row['Thermal_Energy_Demand_Intensity'] = '%.4f' % result.get('thermal_energy_demand_intensity', 0.0)
         row['Max_Living_Room_Overheating'] = '%.2f' % result.get('max_living_room_overheating', 0.0)
         row['Max_Bedroom_Overheating'] = '%.2f' % result.get('max_bedroom_overheating', 0.0)
+        row['Max_Living_Room_Overheating_Zone'] = result.get('max_living_room_overheating_zone', '')
+        row['Max_Bedroom_Overheating_Zone'] = result.get('max_bedroom_overheating_zone', '')
         # Do not include feasibility or internal-only columns in CSV
         if multiobjective:
             row['Pareto_Optimal'] = '' if mode == 'run' else (
@@ -490,12 +507,23 @@ def _format_row(
         if overheating_criterion.upper() == 'CIBSE59':
             row['Max_Living_Room_Overheating'] = '%.2f' % result.get('max_living_room_overheating', 0.0)
             row['Max_Bedroom_Overheating'] = '%.2f' % result.get('max_bedroom_overheating', 0.0)
+            row['Max_Living_Room_Overheating_Zone'] = result.get('max_living_room_overheating_zone', '')
+            row['Max_Bedroom_Overheating_Zone'] = result.get('max_bedroom_overheating_zone', '')
         else:
             row['Max_Overheating_Hours'] = '%.2f' % result.get('max_overheating_hours', 0.0)
+            row['Max_Overheating_Zone'] = result.get('max_overheating_zone', '')
         return row
 
     # unconstrained envelope
     row['Average_Overheating_Hours'] = '%.2f' % result.get('average_overheating_hours', 0.0)
+    row['Max_Living_Room_Overheating'] = '%.2f' % result.get('max_living_room_overheating', 0.0)
+    row['Max_Bedroom_Overheating'] = '%.2f' % result.get('max_bedroom_overheating', 0.0)
+    row['Max_Living_Room_Overheating_Zone'] = result.get(
+        'max_living_room_overheating_zone', ''
+    )
+    row['Max_Bedroom_Overheating_Zone'] = result.get(
+        'max_bedroom_overheating_zone', ''
+    )
     row['Pareto_Optimal'] = 'Pending' if mode == 'run' else ('Yes' if result.get('pareto_optimal', False) else 'No')
     return row
 
@@ -1090,8 +1118,11 @@ def generate_dummy_shading_results(params, overheating_criterion='ASHRAE'):
         'district_heating_kwh': district_heating,
         'average_overheating_hours': average_overheating,
         'max_overheating_hours': max_overheating_hours,
+        'max_overheating_zone': random.choice(['SW:LR', 'NE:BR']),
         'max_living_room_overheating': max_living_room_overheating,
         'max_bedroom_overheating': max_bedroom_overheating,
+        'max_living_room_overheating_zone': random.choice(['SW:LR', 'N:LR']),
+        'max_bedroom_overheating_zone': random.choice(['NE:BR', 'SE:BR']),
         'total_shading_area': total_shading_area
     }
 
@@ -1149,8 +1180,11 @@ def generate_dummy_envelope_results(params, overheating_criterion='ASHRAE'):
         'district_heating_kwh': district_heating,
         'average_overheating_hours': average_overheating,
         'max_overheating_hours': max_overheating_hours,
+        'max_overheating_zone': random.choice(['SW:LR', 'NE:BR']),
         'max_living_room_overheating': max_living_room_overheating,
-        'max_bedroom_overheating': max_bedroom_overheating
+        'max_bedroom_overheating': max_bedroom_overheating,
+        'max_living_room_overheating_zone': random.choice(['SW:LR', 'N:LR']),
+        'max_bedroom_overheating_zone': random.choice(['NE:BR', 'SE:BR'])
     }
     
 def generate_dummy_data(

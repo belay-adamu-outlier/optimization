@@ -110,3 +110,97 @@ def test_notify_appends_only_current_generation(monkeypatch):
     assert calls[1] == (2, 1)
 
 
+def test_rebuild_solutions_includes_max_overheating_zones(monkeypatch):
+    from config.optimization_config import EvaluationCallback
+
+    shared_cache = {
+        'k1': {
+            'objectives': [10.0, 20.0],
+            'generation': 1,
+            'max_overheating_hours': 55.0,
+            'max_overheating_zone': 'NE:BR',
+            'max_living_room_overheating': 40.0,
+            'max_bedroom_overheating': 55.0,
+            'max_living_room_overheating_zone': 'SW:LR',
+            'max_bedroom_overheating_zone': 'NE:BR',
+            'feasible': True,
+            'params': {
+                'external_wall': 'R17 - Wall',
+                'roof': 'R18 - Roof',
+                'window': 'Dbl LoE Spec'
+            }
+        }
+    }
+    optimization_variables = {
+        'external_wall': ['R17 - Wall'],
+        'roof': ['R18 - Roof'],
+        'window': ['Dbl LoE Spec']
+    }
+
+    monkeypatch.setattr(
+        'config.optimization_config.initialize_csv',
+        lambda *args, **kwargs: None
+    )
+
+    cb = EvaluationCallback(
+        optimization_variables,
+        shared_cache=shared_cache,
+        debug_mode=True,
+        optimization_type='envelope',
+        constrained_analysis=True,
+        overheating_criterion='CIBSE59'
+    )
+
+    cb._rebuild_solutions_from_cache()
+
+    solution = cb.solutions_by_key['k1']
+    assert solution['max_living_room_overheating_zone'] == 'SW:LR'
+    assert solution['max_bedroom_overheating_zone'] == 'NE:BR'
+    assert solution['max_overheating_zone'] == 'NE:BR'
+
+
+def test_rebuild_solutions_copies_zones_when_unconstrained(monkeypatch):
+    from config.optimization_config import EvaluationCallback
+
+    shared_cache = {
+        'k1': {
+            'objectives': [10.0, 20.0],
+            'generation': 1,
+            'max_living_room_overheating': 40.0,
+            'max_bedroom_overheating': 55.0,
+            'max_living_room_overheating_zone': 'N:LR',
+            'max_bedroom_overheating_zone': 'SE:BR',
+            'params': {
+                'external_wall': 'R17 - Wall',
+                'roof': 'R18 - Roof',
+                'window': 'Dbl LoE Spec'
+            }
+        }
+    }
+    optimization_variables = {
+        'external_wall': ['R17 - Wall'],
+        'roof': ['R18 - Roof'],
+        'window': ['Dbl LoE Spec']
+    }
+
+    monkeypatch.setattr(
+        'config.optimization_config.initialize_csv',
+        lambda *args, **kwargs: None
+    )
+
+    cb = EvaluationCallback(
+        optimization_variables,
+        shared_cache=shared_cache,
+        debug_mode=True,
+        optimization_type='envelope',
+        constrained_analysis=False,
+        overheating_criterion='CIBSE59'
+    )
+
+    cb._rebuild_solutions_from_cache()
+
+    solution = cb.solutions_by_key['k1']
+    assert solution['max_living_room_overheating_zone'] == 'N:LR'
+    assert solution['max_bedroom_overheating_zone'] == 'SE:BR'
+
+

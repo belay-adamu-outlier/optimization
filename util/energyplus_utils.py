@@ -1542,34 +1542,49 @@ def analyze_simulation_results(
             max_overheating_hours = 0.0
             max_living_room_overheating = 0.0
             max_bedroom_overheating = 0.0
+            max_overheating_zone = ''
+            max_living_room_overheating_zone = ''
+            max_bedroom_overheating_zone = ''
             
             if overheating_results['zone_results']:
-                if overheating_criterion.upper() == 'CIBSE59':
-                    # For CIBSE59, calculate separate maximums for living rooms and bedrooms
-                    living_room_overheating = []
-                    bedroom_overheating = []
-                    
-                    for zone_name, zone_data in overheating_results['zone_results'].items():
-                        if zone_data.get('zone_type') == 'bedroom':
-                            bedroom_overheating.append(zone_data['overheating_hours'])
-                        else:  # living_room/kitchen
-                            living_room_overheating.append(zone_data['overheating_hours'])
-                    
-                    if living_room_overheating:
-                        max_living_room_overheating = max(living_room_overheating)
-                    if bedroom_overheating:
-                        max_bedroom_overheating = max(bedroom_overheating)
-                else:
-                    # For ASHRAE, calculate overall maximum across all zones
-                    max_overheating_hours = max(
-                        zone_data['overheating_hours'] 
-                        for zone_data in overheating_results['zone_results'].values()
+                living_room_overheating = []
+                bedroom_overheating = []
+
+                for zone_name, zone_data in overheating_results['zone_results'].items():
+                    hours = zone_data['overheating_hours']
+                    is_bedroom = (
+                        zone_data.get('zone_type') == 'bedroom'
+                        or zone_name.endswith('BR')
+                        or zone_name.endswith(':BR')
+                    )
+                    if is_bedroom:
+                        bedroom_overheating.append((hours, zone_name))
+                    else:
+                        living_room_overheating.append((hours, zone_name))
+
+                if living_room_overheating:
+                    max_living_room_overheating, max_living_room_overheating_zone = max(
+                        living_room_overheating
+                    )
+                if bedroom_overheating:
+                    max_bedroom_overheating, max_bedroom_overheating_zone = max(
+                        bedroom_overheating
+                    )
+
+                if overheating_criterion.upper() != 'CIBSE59':
+                    max_overheating_hours, max_overheating_zone = max(
+                        (zone_data['overheating_hours'], zone_name)
+                        for zone_name, zone_data
+                        in overheating_results['zone_results'].items()
                     )
         else:
             average_overheating = None
             max_overheating_hours = None
             max_living_room_overheating = None
             max_bedroom_overheating = None
+            max_overheating_zone = ''
+            max_living_room_overheating_zone = ''
+            max_bedroom_overheating_zone = ''
             overheating_results = None
         
         # Calculate total shading area from the modified IDF file
@@ -1595,12 +1610,13 @@ def analyze_simulation_results(
         }
         
         # Add criterion-specific results
-        if overheating_criterion.upper() == 'CIBSE59':
-            results['max_living_room_overheating'] = max_living_room_overheating
-            results['max_bedroom_overheating'] = max_bedroom_overheating
-        else:
-            # For ASHRAE, include overall maximum overheating hours
+        results['max_living_room_overheating'] = max_living_room_overheating
+        results['max_bedroom_overheating'] = max_bedroom_overheating
+        results['max_living_room_overheating_zone'] = max_living_room_overheating_zone
+        results['max_bedroom_overheating_zone'] = max_bedroom_overheating_zone
+        if overheating_criterion.upper() != 'CIBSE59':
             results['max_overheating_hours'] = max_overheating_hours
+            results['max_overheating_zone'] = max_overheating_zone
         
         # Clean up output directory if requested
         if cleanup and os.path.exists(output_dir):

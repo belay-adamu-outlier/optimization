@@ -216,8 +216,6 @@ class EvaluationCallback(Callback):
         if not self.shared_cache:
             return
 
-        cibse59 = self.overheating_criterion.upper() == 'CIBSE59'
-
         for iteration, (combination_key, entry) in enumerate(self.shared_cache.items(), start=1):
             if not isinstance(entry, dict) or 'objectives' not in entry:
                 continue
@@ -238,13 +236,23 @@ class EvaluationCallback(Callback):
                 'iteration': iteration,
                 'thermal_energy_demand_intensity': tedi,
                 'average_overheating_hours': overheating,
+                'max_overheating_hours': entry.get('max_overheating_hours'),
+                'max_overheating_zone': entry.get('max_overheating_zone', ''),
+                'max_living_room_overheating': entry.get(
+                    'max_living_room_overheating', 0.0
+                ),
+                'max_bedroom_overheating': entry.get(
+                    'max_bedroom_overheating', 0.0
+                ),
+                'max_living_room_overheating_zone': entry.get(
+                    'max_living_room_overheating_zone', ''
+                ),
+                'max_bedroom_overheating_zone': entry.get(
+                    'max_bedroom_overheating_zone', ''
+                ),
             }
 
             if self.constrained_analysis:
-                solution['max_overheating_hours'] = entry.get('max_overheating_hours')
-                if cibse59:
-                    solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
-                    solution['max_bedroom_overheating'] = entry.get('max_bedroom_overheating', 0.0)
                 # Feasibility comes from cache; default True if missing
                 solution['feasible'] = bool(entry.get('feasible', True))
             else:
@@ -252,8 +260,6 @@ class EvaluationCallback(Callback):
                 solution['feasible'] = True
 
             if self.optimization_type in ('shading', 'shading_wwr'):
-                solution['max_living_room_overheating'] = entry.get('max_living_room_overheating', 0.0)
-                solution['max_bedroom_overheating'] = entry.get('max_bedroom_overheating', 0.0)
                 solution['total_shading_area'] = entry.get('total_shading_area', 0.0)
 
             for var_name in self.variable_names:
@@ -407,7 +413,10 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 tedi = district_heating / 2590.29
                 lr = results.get('max_living_room_overheating', 0.0) or 0.0
                 br = results.get('max_bedroom_overheating', 0.0) or 0.0
+                lr_zone = results.get('max_living_room_overheating_zone', '') or ''
+                br_zone = results.get('max_bedroom_overheating_zone', '') or ''
                 max_overheating_hours = results.get('max_overheating_hours', 0.0) or 0.0
+                max_overheating_zone = results.get('max_overheating_zone', '') or ''
                 total_area = results.get('total_shading_area', 0.0) or 0.0
                 penalty = compute_shading_penalty(
                     params,
@@ -423,6 +432,7 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                 overheating = 1000.0
                 objectives_raw = [tedi, overheating]
                 lr, br, max_overheating_hours, total_area = 1000.0, 1000.0, 0.0, 1000.0
+                lr_zone, br_zone, max_overheating_zone = '', '', ''
 
             if self.shared_cache is not None:
                 feasible = self._is_feasible(lr, br) if self.constrained_analysis else True
@@ -437,6 +447,9 @@ class BuildingEnvelopeProblem(ElementwiseProblem):
                     max_bedroom_overheating=br,
                     total_shading_area=total_area,
                     feasible=feasible,
+                    max_living_room_overheating_zone=lr_zone,
+                    max_bedroom_overheating_zone=br_zone,
+                    max_overheating_zone=max_overheating_zone,
                 )
 
             # Set outputs directly

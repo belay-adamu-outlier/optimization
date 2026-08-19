@@ -24,6 +24,7 @@ from .energyplus_utils import (
     _expand_partial_schedule,
     build_seasonal_shading_schedules,
     bulk_copy_window_related_objects,
+    analyze_simulation_results,
 )
 
 
@@ -2318,3 +2319,79 @@ class TestBulkCopyWindowRelatedObjects:
         assert report['WINDOWMATERIAL:GLAZING'] == 1
         assert report['WINDOWMATERIAL:GAS'] == 1
         assert report['MATERIALPROPERTY:GLAZINGSPECTRALDATA'] == 1
+
+
+class TestAnalyzeSimulationResults:
+    """Test scenarios for max overheating zone tracking."""
+
+    def _run_analysis(self, criterion, zone_results):
+        """Run analyze_simulation_results with mocked file parsing."""
+        overheating = {
+            'zone_results': zone_results,
+            'average_overheating_hours': 1.0,
+        }
+        analyzer = (
+            'analyze_overheating_with_CIBSE59'
+            if criterion == 'CIBSE59'
+            else 'analyze_overheating_with_ASHRAE'
+        )
+        with patch('util.energyplus_utils.os.path.exists') as mock_exists, \
+             patch('util.energyplus_utils.extract_district_heating_from_htm',
+                   return_value=1000.0), \
+             patch('util.energyplus_utils.parse_eso_file',
+                   return_value=({}, [], {})), \
+             patch('util.energyplus_utils.extract_zone_temperatures',
+                   return_value={}), \
+             patch('util.energyplus_utils.%s' % analyzer,
+                   return_value=overheating):
+            mock_exists.side_effect = (
+                lambda p: not p.endswith('modified_input.idf')
+            )
+            return analyze_simulation_results(
+                'out_dir',
+                cleanup=False,
+                overheating_criterion=criterion,
+            )
+
+    def test_cibse59_max_zones_tracked(self):
+        """Max LR/BR overheating zones follow the argmax zone."""
+        zone_results = {
+            'SW:LR': {'overheating_hours': 40, 'zone_type': 'living_room/kitchen'},
+            'N:LR': {'overheating_hours': 75, 'zone_type': 'living_room/kitchen'},
+            'NE:BR': {'overheating_hours': 20, 'zone_type': 'bedroom'},
+            'SE:BR': {'overheating_hours': 55, 'zone_type': 'bedroom'},
+        }
+
+        results = self._run_analysis('CIBSE59', zone_results)
+
+        assert results['success'] is True
+        assert results['max_living_room_overheating'] == 75
+        assert results['max_living_room_overheating_zone'] == 'N:LR'
+        assert results['max_bedroom_overheating'] == 55
+        assert results['max_bedroom_overheating_zone'] == 'SE:BR'
+
+    def test_cibse59_empty_zone_results(self):
+        """Zone name defaults to empty string when no zones exist."""
+        results = self._run_analysis('CIBSE59', {})
+
+        assert results['max_living_room_overheating'] == 0.0
+        assert results['max_bedroom_overheating'] == 0.0
+        assert results['max_living_room_overheating_zone'] == ''
+        assert results['max_bedroom_overheating_zone'] == ''
+
+    def test_ashrae_max_zone_tracked(self):
+        """ASHRAE overall max overheating zone follows the argmax zone."""
+        zone_results = {
+            'SW:LR': {'overheating_hours': 12},
+            'NE:BR': {'overheating_hours': 88},
+            'SE:BR': {'overheating_hours': 30},
+        }
+
+        results = self._run_analysis('ASHRAE', zone_results)
+
+        assert results['max_overheating_hours'] == 88
+        assert results['max_overheating_zone'] == 'NE:BR'
+        assert results['max_living_room_overheating'] == 12
+        assert results['max_living_room_overheating_zone'] == 'SW:LR'
+        assert results['max_bedroom_overheating'] == 88
+        assert results['max_bedroom_overheating_zone'] == 'NE:BR'
